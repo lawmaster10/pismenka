@@ -1,0 +1,66 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description: string;
+  canonical?: string;
+}
+
+const {
+  title,
+  description,
+  canonical = "https://pismenka.com/",
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#fffaf0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="apple-mobile-web-app-title" content="Písmenka" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content="https://pismenka.com/icon-512.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://pismenka.com/icon-512.png" />
+  </head>
+  <body class="font-sans antialiased">
+    <div class="noise" aria-hidden="true"></div>
+    <header class="relative z-10 mx-auto flex w-[min(1120px,calc(100%-2rem))] items-center justify-between gap-5 py-5 md:py-8">
+      <a class="group inline-flex items-center gap-3 no-underline" href="/" aria-label="Písmenka home">
+        <span class="grid size-11 place-items-center rounded-2xl bg-sun text-lg font-black text-ink letter-shadow transition-transform group-hover:-rotate-3">P</span>
+        <span class="text-xl font-black tracking-[-0.04em]">Písmenka</span>
+      </a>
+      <nav class="flex items-center gap-4 text-sm font-bold text-slate-600 md:gap-6" aria-label="Main navigation">
+        <a class="transition hover:text-ink" href="/support/">Support</a>
+        <a class="transition hover:text-ink" href="/privacy/">Privacy</a>
+        <a class="transition hover:text-ink" href="https://github.com/lawmaster10/pismenka">Source</a>
+      </nav>
+    </header>
+    <slot />
+    <footer class="relative z-10 mx-auto flex w-[min(1120px,calc(100%-2rem))] flex-col gap-3 border-t border-amber-950/10 py-8 text-sm font-semibold text-slate-500 md:flex-row md:items-center md:justify-between">
+      <p>© 2026 Písmenka. Free, ad-free, and open source.</p>
+      <p>
+        <a class="hover:text-ink" href="/support/">Support</a>
+        <span aria-hidden="true"> · </span>
+        <a class="hover:text-ink" href="/privacy/">Privacy</a>
+        <span aria-hidden="true"> · </span>
+        <a class="hover:text-ink" href="mailto:support@pismenka.com">Contact</a>
+      </p>
+    </footer>
+  </body>
+</html>

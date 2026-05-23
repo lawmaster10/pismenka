@@ -1,0 +1,30 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout
+  title="Not found - Písmenka"
+  description="The page you are looking for doesn't exist. Head back to the Písmenka homepage."
+  canonical="https://pismenka.com/"
+>
+  <main class="relative z-10 mx-auto flex min-h-[60vh] w-[min(1120px,calc(100%-2rem))] flex-col items-start justify-center pb-24 pt-10 md:pt-20">
+    <p class="mb-5 inline-flex rounded-full border border-amber-950/10 bg-white/70 px-4 py-2 text-sm font-extrabold text-amber-900 shadow-sm">
+      404
+    </p>
+    <h1 class="max-w-4xl text-6xl font-black leading-[0.9] tracking-[-0.08em] text-ink md:text-8xl">
+      Page wandered off.
+    </h1>
+    <p class="mt-7 max-w-3xl text-xl leading-8 text-slate-600 md:text-2xl md:leading-9">
+      The page you're looking for isn't here. Try the homepage, or read the
+      support and privacy pages.
+    </p>
+    <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+      <a class="inline-flex h-14 items-center justify-center rounded-full bg-ink px-7 text-base font-black text-white transition hover:-translate-y-0.5" href="/">
+        Back to home
+      </a>
+      <a class="inline-flex h-14 items-center justify-center rounded-full border border-amber-950/10 bg-white/70 px-7 text-base font-black text-ink transition hover:-translate-y-0.5" href="/support/">
+        Support
+      </a>
+    </div>
+  </main>
+</Layout>

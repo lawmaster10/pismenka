@@ -1,0 +1,763 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A0000001 /* PismenkaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000011 /* PismenkaApp.swift */; };
+		1A0000002 /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000012 /* Profile.swift */; };
+		1A0000003 /* GameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000013 /* GameState.swift */; };
+		1A0000004 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000014 /* AppSettings.swift */; };
+		1A0000005 /* ProfileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000015 /* ProfileManager.swift */; };
+		1A0000006 /* AudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000016 /* AudioService.swift */; };
+		1A0000007 /* HapticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000017 /* HapticService.swift */; };
+		1A0000008 /* ProfileSelectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000018 /* ProfileSelectView.swift */; };
+		1A0000009 /* ParentGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000019 /* ParentGateView.swift */; };
+		1A000000A /* CreateProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001A /* CreateProfileView.swift */; };
+		1A000000B /* EditProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001B /* EditProfileView.swift */; };
+		1A000000D /* GameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001D /* GameView.swift */; };
+		1A000000E /* EasyModeGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001E /* EasyModeGrid.swift */; };
+		1A0000010 /* SummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020 /* SummaryView.swift */; };
+		1A0000021 /* ConfettiView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022 /* ConfettiView.swift */; };
+		1A0000F01 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000F02 /* DesignSystem.swift */; };
+		1A0000025 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000026 /* Assets.xcassets */; };
+		1A0000041 /* Sounds in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000040 /* Sounds */; };
+		1A0000050 /* SkillLevel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000060 /* SkillLevel.swift */; };
+		1A0000051 /* LetterStat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000061 /* LetterStat.swift */; };
+		1A0000052 /* LetterDifficulty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000062 /* LetterDifficulty.swift */; };
+		1A0000053 /* CalibrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000063 /* CalibrationView.swift */; };
+		1A0000054 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000064 /* SettingsView.swift */; };
+		1A0000055 /* ParentDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000065 /* ParentDashboardView.swift */; };
+		1A0000056 /* LocalDay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000066 /* LocalDay.swift */; };
+		1A0000057 /* ProfileLearningSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000067 /* ProfileLearningSnapshot.swift */; };
+		1A0000058 /* LetterSymbol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000068 /* LetterSymbol.swift */; };
+		1A0000059 /* FocusSelectionReason.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000069 /* FocusSelectionReason.swift */; };
+		1A000005A /* RoundEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000006A /* RoundEvent.swift */; };
+		1A000006B /* SessionCheckpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000070 /* SessionCheckpoint.swift */; };
+		1A000006C /* SessionCheckpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000071 /* SessionCheckpointStore.swift */; };
+		1A000006D /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000072 /* NotificationService.swift */; };
+		1A000006E /* ProfileExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000073 /* ProfileExportService.swift */; };
+		1A000006F /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000074 /* ShareSheet.swift */; };
+		1A000080 /* PismenkaModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000081 /* PismenkaModelTests.swift */; };
+		1A000090 /* FirebaseBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000091 /* FirebaseBackupService.swift */; };
+		1A000093 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000A0 /* FirebaseCore */; };
+		1A000094 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000A1 /* FirebaseAuth */; };
+		1A000095 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000A2 /* FirebaseFirestore */; };
+		1A000096 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000A3 /* GoogleSignIn */; };
+		1A0000C1 /* LearningUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D1 /* LearningUnit.swift */; };
+		1A0000C2 /* UnitProgressStat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D2 /* UnitProgressStat.swift */; };
+		1A0000C3 /* SyllableCurriculum.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D3 /* SyllableCurriculum.swift */; };
+		1A0000C4 /* WordCurriculum.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D4 /* WordCurriculum.swift */; };
+		1A0000C5 /* CurriculumAudioAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D5 /* CurriculumAudioAvailability.swift */; };
+		84EC4E122F9F3BDC006CFBC3 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 84EC4E112F9F3BDC006CFBC3 /* GoogleService-Info.plist */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1A000087 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0000028 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A000002F;
+			remoteInfo = Pismenka;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1A0000011 /* PismenkaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PismenkaApp.swift; sourceTree = "<group>"; };
+		1A0000012 /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
+		1A0000013 /* GameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameState.swift; sourceTree = "<group>"; };
+		1A0000014 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		1A0000015 /* ProfileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileManager.swift; sourceTree = "<group>"; };
+		1A0000016 /* AudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioService.swift; sourceTree = "<group>"; };
+		1A0000017 /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
+		1A0000018 /* ProfileSelectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSelectView.swift; sourceTree = "<group>"; };
+		1A0000019 /* ParentGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentGateView.swift; sourceTree = "<group>"; };
+		1A000001A /* CreateProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateProfileView.swift; sourceTree = "<group>"; };
+		1A000001B /* EditProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditProfileView.swift; sourceTree = "<group>"; };
+		1A000001D /* GameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameView.swift; sourceTree = "<group>"; };
+		1A000001E /* EasyModeGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EasyModeGrid.swift; sourceTree = "<group>"; };
+		1A0000020 /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryView.swift; sourceTree = "<group>"; };
+		1A0000022 /* ConfettiView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfettiView.swift; sourceTree = "<group>"; };
+		1A0000F02 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		1A0000026 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A0000027 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A0000030 /* Pismenka.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pismenka.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000040 /* Sounds */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sounds; sourceTree = "<group>"; };
+		1A0000060 /* SkillLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLevel.swift; sourceTree = "<group>"; };
+		1A0000061 /* LetterStat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LetterStat.swift; sourceTree = "<group>"; };
+		1A0000062 /* LetterDifficulty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LetterDifficulty.swift; sourceTree = "<group>"; };
+		1A0000063 /* CalibrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationView.swift; sourceTree = "<group>"; };
+		1A0000064 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		1A0000065 /* ParentDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentDashboardView.swift; sourceTree = "<group>"; };
+		1A0000066 /* LocalDay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDay.swift; sourceTree = "<group>"; };
+		1A0000067 /* ProfileLearningSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLearningSnapshot.swift; sourceTree = "<group>"; };
+		1A0000068 /* LetterSymbol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LetterSymbol.swift; sourceTree = "<group>"; };
+		1A0000069 /* FocusSelectionReason.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusSelectionReason.swift; sourceTree = "<group>"; };
+		1A000006A /* RoundEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundEvent.swift; sourceTree = "<group>"; };
+		1A0000070 /* SessionCheckpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCheckpoint.swift; sourceTree = "<group>"; };
+		1A0000071 /* SessionCheckpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCheckpointStore.swift; sourceTree = "<group>"; };
+		1A0000072 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		1A0000073 /* ProfileExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileExportService.swift; sourceTree = "<group>"; };
+		1A0000074 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
+		1A000081 /* PismenkaModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PismenkaModelTests.swift; sourceTree = "<group>"; };
+		1A000082 /* PismenkaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PismenkaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A000091 /* FirebaseBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseBackupService.swift; sourceTree = "<group>"; };
+		1A0000D1 /* LearningUnit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningUnit.swift; sourceTree = "<group>"; };
+		1A0000D2 /* UnitProgressStat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnitProgressStat.swift; sourceTree = "<group>"; };
+		1A0000D3 /* SyllableCurriculum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyllableCurriculum.swift; sourceTree = "<group>"; };
+		1A0000D4 /* WordCurriculum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordCurriculum.swift; sourceTree = "<group>"; };
+		1A0000D5 /* CurriculumAudioAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurriculumAudioAvailability.swift; sourceTree = "<group>"; };
+		84EC4E112F9F3BDC006CFBC3 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A000002D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A000093 /* FirebaseCore in Frameworks */,
+				1A000094 /* FirebaseAuth in Frameworks */,
+				1A000095 /* FirebaseFirestore in Frameworks */,
+				1A000096 /* GoogleSignIn in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A000085 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A0000100 = {
+			isa = PBXGroup;
+			children = (
+				1A0000101 /* Pismenka */,
+				1A00008B /* PismenkaTests */,
+				1A0000102 /* Products */,
+				84EC4E112F9F3BDC006CFBC3 /* GoogleService-Info.plist */,
+			);
+			sourceTree = "<group>";
+		};
+		1A0000101 /* Pismenka */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000011 /* PismenkaApp.swift */,
+				1A0000103 /* Models */,
+				1A0000104 /* Services */,
+				1A0000105 /* Views */,
+				1A0000026 /* Assets.xcassets */,
+				1A0000040 /* Sounds */,
+				1A0000027 /* Info.plist */,
+			);
+			path = Pismenka;
+			sourceTree = "<group>";
+		};
+		1A0000102 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000030 /* Pismenka.app */,
+				1A000082 /* PismenkaTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1A0000103 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000012 /* Profile.swift */,
+				1A0000013 /* GameState.swift */,
+				1A0000014 /* AppSettings.swift */,
+				1A0000060 /* SkillLevel.swift */,
+				1A0000061 /* LetterStat.swift */,
+				1A0000062 /* LetterDifficulty.swift */,
+				1A0000066 /* LocalDay.swift */,
+				1A0000067 /* ProfileLearningSnapshot.swift */,
+				1A0000068 /* LetterSymbol.swift */,
+				1A0000069 /* FocusSelectionReason.swift */,
+				1A000006A /* RoundEvent.swift */,
+				1A0000070 /* SessionCheckpoint.swift */,
+				1A0000D1 /* LearningUnit.swift */,
+				1A0000D2 /* UnitProgressStat.swift */,
+				1A0000D3 /* SyllableCurriculum.swift */,
+				1A0000D4 /* WordCurriculum.swift */,
+				1A0000D5 /* CurriculumAudioAvailability.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		1A0000104 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000015 /* ProfileManager.swift */,
+				1A0000016 /* AudioService.swift */,
+				1A0000017 /* HapticService.swift */,
+				1A0000071 /* SessionCheckpointStore.swift */,
+				1A0000072 /* NotificationService.swift */,
+				1A0000073 /* ProfileExportService.swift */,
+				1A000091 /* FirebaseBackupService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		1A0000105 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000106 /* Profile */,
+				1A0000108 /* Game */,
+				1A0000109 /* Summary */,
+				1A000010A /* Components */,
+				1A000010B /* Settings */,
+				1A000010C /* Parent */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		1A0000106 /* Profile */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000018 /* ProfileSelectView.swift */,
+				1A0000019 /* ParentGateView.swift */,
+				1A000001A /* CreateProfileView.swift */,
+				1A000001B /* EditProfileView.swift */,
+			);
+			path = Profile;
+			sourceTree = "<group>";
+		};
+		1A0000108 /* Game */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000063 /* CalibrationView.swift */,
+				1A000001D /* GameView.swift */,
+				1A000001E /* EasyModeGrid.swift */,
+			);
+			path = Game;
+			sourceTree = "<group>";
+		};
+		1A0000109 /* Summary */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000020 /* SummaryView.swift */,
+			);
+			path = Summary;
+			sourceTree = "<group>";
+		};
+		1A000010A /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000022 /* ConfettiView.swift */,
+				1A0000074 /* ShareSheet.swift */,
+				1A0000F02 /* DesignSystem.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		1A000010B /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000064 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		1A000010C /* Parent */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000065 /* ParentDashboardView.swift */,
+			);
+			path = Parent;
+			sourceTree = "<group>";
+		};
+		1A00008B /* PismenkaTests */ = {
+			isa = PBXGroup;
+			children = (
+				1A000081 /* PismenkaModelTests.swift */,
+			);
+			path = PismenkaTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A000002F /* Pismenka */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0000039 /* Build configuration list for PBXNativeTarget "Pismenka" */;
+			buildPhases = (
+				1A000002C /* Sources */,
+				1A000002D /* Frameworks */,
+				1A000002E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Pismenka;
+			packageProductDependencies = (
+				1A0000A0 /* FirebaseCore */,
+				1A0000A1 /* FirebaseAuth */,
+				1A0000A2 /* FirebaseFirestore */,
+				1A0000A3 /* GoogleSignIn */,
+			);
+			productName = Pismenka;
+			productReference = 1A0000030 /* Pismenka.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1A000083 /* PismenkaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A00008A /* Build configuration list for PBXNativeTarget "PismenkaTests" */;
+			buildPhases = (
+				1A000084 /* Sources */,
+				1A000085 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1A000086 /* PBXTargetDependency */,
+			);
+			name = PismenkaTests;
+			productName = PismenkaTests;
+			productReference = 1A000082 /* PismenkaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A0000028 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					1A000002F = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					1A000083 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 1A000002F;
+					};
+				};
+			};
+			buildConfigurationList = 1A000002B /* Build configuration list for PBXProject "Pismenka" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				cs,
+				Base,
+			);
+			mainGroup = 1A0000100;
+			packageReferences = (
+				1A0000B0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				1A0000B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
+			productRefGroup = 1A0000102 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A000002F /* Pismenka */,
+				1A000083 /* PismenkaTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A000002E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000025 /* Assets.xcassets in Resources */,
+				84EC4E122F9F3BDC006CFBC3 /* GoogleService-Info.plist in Resources */,
+				1A0000041 /* Sounds in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A000002C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000001 /* PismenkaApp.swift in Sources */,
+				1A0000002 /* Profile.swift in Sources */,
+				1A0000003 /* GameState.swift in Sources */,
+				1A0000004 /* AppSettings.swift in Sources */,
+				1A0000005 /* ProfileManager.swift in Sources */,
+				1A0000006 /* AudioService.swift in Sources */,
+				1A0000007 /* HapticService.swift in Sources */,
+				1A0000008 /* ProfileSelectView.swift in Sources */,
+				1A0000009 /* ParentGateView.swift in Sources */,
+				1A000000A /* CreateProfileView.swift in Sources */,
+				1A000000B /* EditProfileView.swift in Sources */,
+				1A000000D /* GameView.swift in Sources */,
+				1A000000E /* EasyModeGrid.swift in Sources */,
+				1A0000010 /* SummaryView.swift in Sources */,
+				1A0000021 /* ConfettiView.swift in Sources */,
+				1A0000F01 /* DesignSystem.swift in Sources */,
+				1A0000050 /* SkillLevel.swift in Sources */,
+				1A0000051 /* LetterStat.swift in Sources */,
+				1A0000052 /* LetterDifficulty.swift in Sources */,
+				1A0000053 /* CalibrationView.swift in Sources */,
+				1A0000054 /* SettingsView.swift in Sources */,
+				1A0000055 /* ParentDashboardView.swift in Sources */,
+				1A0000056 /* LocalDay.swift in Sources */,
+				1A0000057 /* ProfileLearningSnapshot.swift in Sources */,
+				1A0000058 /* LetterSymbol.swift in Sources */,
+				1A0000059 /* FocusSelectionReason.swift in Sources */,
+				1A000005A /* RoundEvent.swift in Sources */,
+				1A000006B /* SessionCheckpoint.swift in Sources */,
+				1A000006C /* SessionCheckpointStore.swift in Sources */,
+				1A000006D /* NotificationService.swift in Sources */,
+				1A000006E /* ProfileExportService.swift in Sources */,
+				1A000006F /* ShareSheet.swift in Sources */,
+				1A0000C1 /* LearningUnit.swift in Sources */,
+				1A0000C2 /* UnitProgressStat.swift in Sources */,
+				1A0000C3 /* SyllableCurriculum.swift in Sources */,
+				1A0000C4 /* WordCurriculum.swift in Sources */,
+				1A0000C5 /* CurriculumAudioAvailability.swift in Sources */,
+				1A000090 /* FirebaseBackupService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A000084 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A000080 /* PismenkaModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1A000086 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A000002F /* Pismenka */;
+			targetProxy = 1A000087 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1A0000037 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 6VJV65V7PB;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		1A0000038 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 6VJV65V7PB;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1A000003A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6VJV65V7PB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Pismenka/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Písmenka";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "CY-C7DBCED6-A931-11E9-A784-3F0DCDF3F5B5.com.electratea";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Debug;
+		};
+		1A000003B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6VJV65V7PB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Pismenka/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Písmenka";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "CY-C7DBCED6-A931-11E9-A784-3F0DCDF3F5B5.com.electratea";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Release;
+		};
+		1A000088 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6VJV65V7PB;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pismenka.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Pismenka";
+			};
+			name = Debug;
+		};
+		1A000089 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6VJV65V7PB;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pismenka.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Pismenka";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A000002B /* Build configuration list for PBXProject "Pismenka" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0000037 /* Debug */,
+				1A0000038 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A0000039 /* Build configuration list for PBXNativeTarget "Pismenka" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A000003A /* Debug */,
+				1A000003B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A00008A /* Build configuration list for PBXNativeTarget "PismenkaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A000088 /* Debug */,
+				1A000089 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1A0000B0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.12.1;
+			};
+		};
+		1A0000B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A0000A0 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0000B0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		1A0000A1 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0000B0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		1A0000A2 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0000B0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		1A0000A3 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0000B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1A0000028 /* Project object */;
+}

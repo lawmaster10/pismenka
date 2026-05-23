@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://pismenka.com/sitemap.xml

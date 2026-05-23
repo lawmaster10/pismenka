@@ -1,0 +1,85 @@
+---
+import Layout from "../../layouts/Layout.astro";
+
+const quickAnswers = [
+  "Gameplay and learning work offline on the device.",
+  "Each child profile has independent progress and settings.",
+  "Profiles can practice in Czech or English.",
+  "Google/Firebase backup is optional and parent-enabled.",
+  "The app is free, has no ads, and does not sell data.",
+];
+
+const commonFixes = [
+  "If audio is quiet, check the device mute switch and volume.",
+  "Use the parent settings screen to review audio and backup status.",
+  "If a child is stuck, adaptive practice simplifies and revisits the unit.",
+  "Optional cloud backup requires Google Sign-In from the parent settings area.",
+];
+---
+
+<Layout
+  title="Support - Písmenka"
+  description="Support information for Písmenka, a free letter practice app for children."
+  canonical="https://pismenka.com/support/"
+>
+  <main class="relative z-10 mx-auto w-[min(1120px,calc(100%-2rem))] pb-24 pt-10 md:pt-20">
+    <p class="mb-5 inline-flex rounded-full border border-amber-950/10 bg-white/70 px-4 py-2 text-sm font-extrabold text-amber-900 shadow-sm">
+      Support
+    </p>
+    <h1 class="max-w-4xl text-6xl font-black leading-[0.9] tracking-[-0.08em] text-ink md:text-8xl">
+      How can we help?
+    </h1>
+    <p class="mt-7 max-w-3xl text-xl leading-8 text-slate-600 md:text-2xl md:leading-9">
+      Písmenka is a free, ad-free letter practice app for children. If something
+      does not work as expected, send the device model, iOS version, and a short
+      description of what happened.
+    </p>
+
+    <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+      <a class="inline-flex h-14 items-center justify-center rounded-full bg-ink px-7 text-base font-black text-white transition hover:-translate-y-0.5" href="mailto:support@pismenka.com">
+        Email support@pismenka.com
+      </a>
+      <a class="inline-flex h-14 items-center justify-center rounded-full border border-amber-950/10 bg-white/70 px-7 text-base font-black text-ink transition hover:-translate-y-0.5" href="https://github.com/lawmaster10/pismenka/issues">
+        Open a GitHub issue
+      </a>
+    </div>
+
+    <section class="mt-16 grid gap-5 md:grid-cols-2">
+      <article class="soft-card rounded-[2rem] p-7 md:p-9">
+        <h2 class="text-3xl font-black tracking-[-0.05em] text-ink">Quick answers</h2>
+        <ul class="mt-6 space-y-4 text-lg leading-7 text-slate-600">
+          {quickAnswers.map((item) => (
+            <li class="flex gap-3">
+              <span class="mt-1 grid size-6 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-black text-emerald-700">✓</span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      </article>
+
+      <article class="soft-card rounded-[2rem] p-7 md:p-9">
+        <h2 class="text-3xl font-black tracking-[-0.05em] text-ink">Common fixes</h2>
+        <ul class="mt-6 space-y-4 text-lg leading-7 text-slate-600">
+          {commonFixes.map((item) => (
+            <li class="flex gap-3">
+              <span class="mt-1 grid size-6 shrink-0 place-items-center rounded-full bg-amber-100 text-sm font-black text-amber-700">•</span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      </article>
+    </section>
+
+    <section class="glass mt-6 rounded-[2rem] p-7 md:p-9">
+      <h2 class="text-3xl font-black tracking-[-0.05em] text-ink">Privacy and source code</h2>
+      <p class="mt-4 max-w-3xl text-lg leading-8 text-slate-600">
+        Písmenka is local-first. Learning progress stays on the device unless a
+        parent turns on optional backup. The app is intended to be fully open
+        source, so families can inspect how practice and progress work.
+      </p>
+      <p class="mt-5 text-base font-bold text-slate-500">
+        Privacy details are available at <a class="text-ink underline decoration-sun decoration-4 underline-offset-4" href="/privacy/">pismenka.com/privacy</a>.
+      </p>
+    </section>
+  </main>
+</Layout>

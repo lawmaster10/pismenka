@@ -1,0 +1,98 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const appStoreUrl = "https://apps.apple.com/us/search?term=pismenka";
+const features = [
+  ["Adaptive", "Practice follows each child’s answers, known letters, and tricky spots."],
+  ["Czech + English", "Profiles can learn in Czech or English, with local audio prompts."],
+  ["Local-first", "Gameplay and learning work offline. Optional backup is parent-enabled."],
+];
+---
+
+<Layout
+  title="Písmenka - playful letter practice"
+  description="Písmenka is a free, ad-free letter practice app for children learning Czech and English letters."
+>
+  <main class="relative z-10">
+    <section class="mx-auto grid w-[min(1120px,calc(100%-2rem))] items-center gap-12 pb-16 pt-10 md:grid-cols-[1.04fr_.96fr] md:pb-24 md:pt-20">
+      <div>
+        <p class="mb-5 inline-flex rounded-full border border-amber-950/10 bg-white/70 px-4 py-2 text-sm font-extrabold text-amber-900 shadow-sm">
+          Free to download · No ads · Open source
+        </p>
+        <h1 class="max-w-3xl text-6xl font-black leading-[0.88] tracking-[-0.085em] text-ink sm:text-7xl lg:text-8xl">
+          Little letters. Big confidence.
+        </h1>
+        <p class="mt-7 max-w-2xl text-xl leading-8 text-slate-600 md:text-2xl md:leading-9">
+          Písmenka gives young children calm daily practice with letters in Czech
+          and English. Sessions are short, friendly, and shaped around each
+          child’s progress.
+        </p>
+        <div class="mt-9 flex flex-col gap-3 sm:flex-row">
+          <a class="app-store-badge inline-flex h-14 items-center justify-center rounded-full bg-ink px-7 text-base font-black text-white transition hover:-translate-y-0.5" href={appStoreUrl}>
+            Download on the App Store
+          </a>
+          <a class="inline-flex h-14 items-center justify-center rounded-full border border-amber-950/10 bg-white/70 px-7 text-base font-black text-ink transition hover:-translate-y-0.5" href="/support/">
+            Support
+          </a>
+        </div>
+        <p class="mt-4 text-sm font-semibold text-slate-500">
+          App Store link will point directly to Písmenka once Apple finishes publishing the listing.
+        </p>
+      </div>
+
+      <div class="floaty glass mx-auto w-full max-w-[410px] rounded-[2.5rem] p-5">
+        <div class="rounded-[2rem] bg-gradient-to-b from-white to-amber-50 p-6">
+          <div class="mb-6 flex items-center justify-between">
+            <div>
+              <p class="text-sm font-black uppercase tracking-[0.18em] text-slate-400">Today</p>
+              <p class="text-2xl font-black tracking-[-0.05em] text-ink">Daily letters</p>
+            </div>
+            <div class="rounded-full bg-rose-100 px-3 py-2 text-sm font-black text-rose-500">5 ♥</div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid aspect-square place-items-center rounded-[1.5rem] bg-emerald-100 text-6xl font-black text-ink letter-shadow">M</div>
+            <div class="grid aspect-square place-items-center rounded-[1.5rem] bg-amber-100 text-6xl font-black text-ink letter-shadow">Á</div>
+            <div class="grid aspect-square place-items-center rounded-[1.5rem] bg-indigo-100 text-6xl font-black text-ink letter-shadow">S</div>
+            <div class="grid aspect-square place-items-center rounded-[1.5rem] bg-pink-100 text-6xl font-black text-ink letter-shadow">P</div>
+          </div>
+          <div class="mt-6 rounded-3xl bg-white/80 p-4">
+            <div class="h-3 overflow-hidden rounded-full bg-amber-100">
+              <div class="h-full w-[68%] rounded-full bg-gradient-to-r from-leaf to-sky"></div>
+            </div>
+            <div class="mt-3 flex items-center justify-between text-sm font-black text-slate-500">
+              <span>17 / 25</span>
+              <span>Winner soon</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto w-[min(1120px,calc(100%-2rem))] pb-20 md:pb-28">
+      <div class="grid gap-4 md:grid-cols-3">
+        {features.map(([title, text]) => (
+          <article class="soft-card rounded-[2rem] p-7">
+            <h2 class="text-2xl font-black tracking-[-0.05em] text-ink">{title}</h2>
+            <p class="mt-3 text-base leading-7 text-slate-600">{text}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <section class="mx-auto w-[min(1120px,calc(100%-2rem))] pb-24">
+      <div class="soft-card overflow-hidden rounded-[2.5rem] p-8 md:p-12">
+        <div class="max-w-3xl">
+          <p class="mb-4 text-sm font-black uppercase tracking-[0.2em] text-slate-400">For parents</p>
+          <h2 class="text-4xl font-black leading-none tracking-[-0.06em] text-ink md:text-6xl">
+            Practice without pressure.
+          </h2>
+          <p class="mt-6 text-lg leading-8 text-slate-600">
+            Písmenka starts with friendly calibration, then uses short sessions,
+            visible daily goals, and parent-readable progress. Children can learn
+            at their own pace, and the app keeps working even without internet.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+</Layout>

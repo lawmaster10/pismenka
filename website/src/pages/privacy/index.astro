@@ -1,0 +1,67 @@
+---
+import Layout from "../../layouts/Layout.astro";
+
+const practices = [
+  "No third-party advertising.",
+  "No sale of personal data.",
+  "No public child profiles.",
+  "No account required for normal gameplay.",
+  "Optional backup uses Google Sign-In and Firebase only when a parent enables it.",
+];
+---
+
+<Layout
+  title="Privacy - Písmenka"
+  description="Privacy information for Písmenka, a free, ad-free letter practice app."
+  canonical="https://pismenka.com/privacy/"
+>
+  <main class="relative z-10 mx-auto w-[min(1120px,calc(100%-2rem))] pb-24 pt-10 md:pt-20">
+    <p class="mb-5 inline-flex rounded-full border border-amber-950/10 bg-white/70 px-4 py-2 text-sm font-extrabold text-amber-900 shadow-sm">
+      Privacy
+    </p>
+    <h1 class="max-w-4xl text-6xl font-black leading-[0.9] tracking-[-0.08em] text-ink md:text-8xl">
+      Local-first by design.
+    </h1>
+    <p class="mt-7 max-w-3xl text-xl leading-8 text-slate-600 md:text-2xl md:leading-9">
+      Písmenka is free to download, has no advertising, and does not sell
+      personal data. Gameplay and learning progress work on the device without
+      an account.
+    </p>
+
+    <section class="mt-16 grid gap-5 md:grid-cols-2">
+      <article class="soft-card rounded-[2rem] p-7 md:p-9">
+        <h2 class="text-3xl font-black tracking-[-0.05em] text-ink">What stays on device</h2>
+        <p class="mt-5 text-lg leading-8 text-slate-600">
+          Child profiles, practice history, progress, settings, and session state
+          are saved locally first. The app does not require network access for
+          gameplay, audio prompts, calibration, dashboards, or learning progress.
+        </p>
+      </article>
+
+      <article class="soft-card rounded-[2rem] p-7 md:p-9">
+        <h2 class="text-3xl font-black tracking-[-0.05em] text-ink">Optional backup</h2>
+        <p class="mt-5 text-lg leading-8 text-slate-600">
+          Parents may choose to enable Google/Firebase backup to help recover
+          progress. When enabled, profile progress is mirrored to a
+          parent-controlled cloud backup. If backup is disabled, the learning
+          experience is unchanged.
+        </p>
+      </article>
+    </section>
+
+    <section class="glass mt-6 rounded-[2rem] p-7 md:p-9">
+      <h2 class="text-3xl font-black tracking-[-0.05em] text-ink">Data practices</h2>
+      <ul class="mt-6 grid gap-4 text-lg leading-7 text-slate-600 md:grid-cols-2">
+        {practices.map((item) => (
+          <li class="flex gap-3">
+            <span class="mt-1 grid size-6 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-black text-emerald-700">✓</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      <p class="mt-7 text-base font-bold text-slate-500">
+        Questions? Email <a class="text-ink underline decoration-sun decoration-4 underline-offset-4" href="mailto:support@pismenka.com">support@pismenka.com</a>.
+      </p>
+    </section>
+  </main>
+</Layout>

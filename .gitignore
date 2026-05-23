@@ -1,0 +1,15 @@
+DerivedData/
+.DerivedData/
+xcuserdata/
+*.xcuserstate
+/GoogleService-Info*.plist
+.env
+.DS_Store
+.astro/
+.tmp/
+__pycache__/
+*.pyc
+node_modules/
+website/dist/
+.wrangler/
+audio_backups/
