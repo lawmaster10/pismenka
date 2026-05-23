@@ -2,42 +2,48 @@
 //  LetterDifficulty.swift
 //  Pismenka
 //
-//  Pedagogical letter ordering, the parent-declared "starter familiar" set,
-//  and a visually-confusing-pairs map shared by the calibration view and the
-//  adaptive game's distractor picker.
+//  Pedagogical letter ordering, the generalized early-recognition set used to
+//  seed first-run calibration, and a visually-confusing-pairs map shared by
+//  the calibration view and the adaptive game's distractor picker.
 //
 
 import Foundation
 
 enum LetterDifficulty {
 
-    /// The parent-declared "my kid likely already knows these" set — used only
-    /// to overweight the calibration pool so the very first session feels
-    /// successful. `isKnown` is still determined by real performance; nothing
-    /// is synthetically pre-seeded.
-    static let starterFamiliar: [String] = ["B", "V", "T", "M", "J", "O", "A", "C", "S"]
+    /// Generalized "letters most preschoolers recognize first" set, used to
+    /// seed the very first calibration so a brand-new profile encounters
+    /// letters that are likely to feel familiar. Drawn from preschool letter-
+    /// recognition research (alphabet-song head A–E, plus visually distinctive
+    /// O / X / M / S / T that consistently rank near the top of early-
+    /// recognition studies). `isKnown` is still determined by real
+    /// performance; nothing is synthetically pre-seeded.
+    static let earlyRecognitionLetters: [String] = [
+        "A", "B", "C", "O", "X", "M", "S", "T", "D", "E"
+    ]
 
     /// Pedagogical / frequency order for picking the next focus letter.
-    /// `starterFamiliar` letters appear *last* because calibration is expected
-    /// to mark them as already known, so they shouldn't compete for "next focus"
-    /// slots. Czech adds diacritic letters at the end so `expert` is achievable
-    /// but accents come last.
+    /// `earlyRecognitionLetters` appear *last* because calibration is expected
+    /// to gather evidence on them first, so they shouldn't compete for "next
+    /// focus" slots before that evidence exists. Czech adds diacritic letters
+    /// at the end so `expert` is achievable but accents come last.
     static func introductionOrder(for language: GameLanguage) -> [String] {
         switch language.resolvedLanguage {
         case .english, .system:
             return [
-                "P", "R", "N", "L", "E", "I", "D", "H", "K", "G",
-                "F", "Y", "U", "W", "Z", "Q", "X",
-                // Starter-familiar letters appear last (likely-known by calibration).
-                "B", "V", "T", "M", "J", "O", "A", "C", "S"
+                "P", "R", "N", "L", "I", "H", "K", "G",
+                "F", "Y", "U", "W", "Z", "Q", "J", "V",
+                // Early-recognition letters appear last (calibration gathers
+                // evidence on them up front).
+                "A", "B", "C", "O", "X", "M", "S", "T", "D", "E"
             ]
         case .czech:
             // Same English-letter order first (Czech alphabet contains all of A-Z),
             // then diacritic letters at the end so `expert` requires those too.
             return [
-                "P", "R", "N", "L", "E", "I", "D", "H", "K", "G",
-                "F", "Y", "U", "W", "Z", "Q", "X",
-                "B", "V", "T", "M", "J", "O", "A", "C", "S",
+                "P", "R", "N", "L", "I", "H", "K", "G",
+                "F", "Y", "U", "W", "Z", "Q", "J", "V",
+                "A", "B", "C", "O", "X", "M", "S", "T", "D", "E",
                 "Á", "Č", "Ď", "É", "Ě", "Í", "Ň", "Ó", "Ř", "Š",
                 "Ť", "Ú", "Ů", "Ý", "Ž"
             ]
@@ -57,12 +63,37 @@ enum LetterDifficulty {
         return upper + lower
     }
 
-    /// 10-letter pool used by `CalibrationView`: the 9 starter-familiar letters
-    /// plus the next non-familiar letter from `introductionOrder` (English: P).
-    static func calibrationPool(for language: GameLanguage) -> [String] {
-        let nextNonFamiliar = introductionOrder(for: language)
-            .first(where: { !starterFamiliar.contains($0) }) ?? "P"
-        return starterFamiliar + [nextNonFamiliar]
+    /// Pool used by `CalibrationView`: the generalized 10-letter early-
+    /// recognition set, optionally extended with the first letter of the
+    /// child's name (mapped from a Czech diacritic to its base if needed) so
+    /// the very first session contains a personally meaningful letter. Returns
+    /// 10 letters when the name letter is absent, already in the base set, or
+    /// not eligible; otherwise 11 letters.
+    static func calibrationPool(
+        for language: GameLanguage,
+        nameLetter: String? = nil
+    ) -> [String] {
+        var pool = earlyRecognitionLetters
+        if let mapped = nameLetterForCalibration(nameLetter, language: language),
+           !pool.contains(mapped) {
+            pool.append(mapped)
+        }
+        return pool
+    }
+
+    /// Resolves a child's first-name letter to a calibration-eligible base
+    /// letter. Maps Czech diacritics to their base (Š → S) so calibration
+    /// stays within the pedagogical "base before diacritic" contract, and
+    /// drops letters that aren't part of the active alphabet.
+    static func nameLetterForCalibration(
+        _ nameLetter: String?,
+        language: GameLanguage
+    ) -> String? {
+        guard let nameLetter, !nameLetter.isEmpty else { return nil }
+        let base = diacriticBase[nameLetter] ?? nameLetter
+        guard language.letters.contains(base) else { return nil }
+        guard isEligibleTarget(base, language: language) else { return nil }
+        return base
     }
 
     /// Non-letter lookalikes that can appear only as advanced/expert
@@ -88,7 +119,9 @@ enum LetterDifficulty {
     }()
 
     /// Visually confusing pairs — used to avoid or intentionally practice
-    /// letter distractors that look too much like the target. This graph is
+    /// distractors that are hard to distinguish from the target. This includes
+    /// shape-similar pairs (B/D, M/W) and same-base letters whose small
+    /// distinguishing mark is easy to overlook (C/Č, S/Š). This graph is
     /// symmetric by construction. Directional non-letter lookalikes live in
     /// `visualOnlyDistractorsByTarget`.
     static let visuallyConfusingPairs: [String: Set<String>] = {
@@ -119,6 +152,12 @@ enum LetterDifficulty {
         connect(lower("N"), lower("U"))
         connect("M", "W")
         connect(lower("M"), lower("W"))
+        connect("N", "M")
+        connect(lower("N"), lower("M"))
+        connect("N", "Z")
+        connect(lower("N"), lower("Z"))
+        connect("V", "W")
+        connect(lower("V"), lower("W"))
 
         // Shape-similar lowercase families.
         connect(lower("M"), lower("N"))
@@ -144,6 +183,14 @@ enum LetterDifficulty {
         connectGroup(["C", "G", "O"])
         connectGroup(["O", "Q", "D"])
 
+        // Czech diacritic contrasts. Connect each diacritic only to its base:
+        // sibling marks such as É/Ě and Ú/Ů should not become mutual mastery
+        // prerequisites in the focus picker.
+        for (diacritic, base) in diacriticBase {
+            connect(base, diacritic)
+            connect(lower(base), lower(diacritic))
+        }
+
         return map
     }()
 
@@ -164,6 +211,12 @@ enum LetterDifficulty {
         if let set = visuallyConfusingPairs[a], set.contains(b) { return true }
         if let set = visuallyConfusingPairs[b], set.contains(a) { return true }
         return false
+    }
+
+    static func diacriticBaseKey(for key: String) -> String? {
+        let upper = uppercaseBaseKey(for: key)
+        guard let base = diacriticBase[upper] else { return nil }
+        return isLowercaseKey(key) ? LetterSymbol.lower(base, in: .english).storageKey : base
     }
 
     static func visualOnlyDistractors(for target: String) -> Set<String> {
@@ -231,7 +284,11 @@ enum LetterDifficulty {
             .subtracting(blocked)
             .filter { key in
                 guard let stat = letterStats[key] else { return false }
-                return stat.targetAttempts >= 3 && stat.recentAccuracy(window: 5) < 0.5
+                // Threshold is `>= 2` because first-run calibration deliberately
+                // gives every pool letter exactly two target attempts; a clean
+                // 0/2 there is strong enough signal to re-teach rather than
+                // skip past in favor of an unrelated next-focus letter.
+                return stat.targetAttempts >= 2 && stat.recentAccuracy(window: 5) < 0.5
             }
             .sorted { a, b in
                 let pa = letterStats[a]?.reviewPriority ?? 0
@@ -244,8 +301,12 @@ enum LetterDifficulty {
         }
 
         func diacriticPrerequisiteMet(_ candidate: String) -> Bool {
-            guard let base = diacriticBase[candidate] else { return true }
+            guard let base = diacriticBaseKey(for: candidate) else { return true }
             return mastered.contains(base)
+        }
+
+        func isDiacriticVariant(_ maybeVariant: String, of candidate: String) -> Bool {
+            diacriticBaseKey(for: maybeVariant) == candidate
         }
 
         func isReady(_ candidate: String) -> Bool {
@@ -254,7 +315,12 @@ enum LetterDifficulty {
 
             let confusables = visuallyConfusingPairs[candidate] ?? []
             let alphabetConfusables = confusables.intersection(alphabet)
-            let allPrereqsKnown = alphabetConfusables.allSatisfy { mastered.contains($0) }
+            let prerequisiteConfusables = alphabetConfusables.filter { confusable in
+                // C should not require future Č mastery, but Č still requires
+                // C through `diacriticPrerequisiteMet`.
+                !isDiacriticVariant(confusable, of: candidate)
+            }
+            let allPrereqsKnown = prerequisiteConfusables.allSatisfy { mastered.contains($0) }
 
             let poolSize = known.union(learning).subtracting([candidate]).count
             let poolOK = poolSize >= 4

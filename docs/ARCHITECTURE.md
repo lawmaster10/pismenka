@@ -113,14 +113,15 @@ The level **is not** chosen — the app discovers it during calibration. There's
 
 ### 2. Calibration (one-time per profile)
 
-[`CalibrationView`](Pismenka/Views/Game/CalibrationView.swift) plays a friendly 10-20 round calibration drawn from a 10-letter calibration pool: the nine starter-familiar letters `B V T M J O A C S` plus the next pedagogical letter (English: `P`). The pool is **front-loaded** with the starter-familiar letters so the very first session feels like a stream of small wins, not an assessment.
+[`CalibrationView`](Pismenka/Views/Game/CalibrationView.swift) plays a friendly ~10-22 round calibration drawn from a generalized early-recognition pool. The base 10 letters come from `LetterDifficulty.earlyRecognitionLetters` — `A B C O X M S T D E` — which mirror published preschool letter-recognition rankings (alphabet-song head `A`-`E` plus visually distinctive `O`/`X`/`M`/`S`/`T`). The first letter of the child's typed name is added to the pool when it isn't already in the base 10 (Czech diacritics like `Š` are mapped to their base, `S`, so the diacritic-prerequisite contract isn't violated), and that name letter is moved to the very first round so the calibration opens on a personally meaningful, high-confidence prompt.
 
+- Each pool letter is scheduled to appear exactly twice; with a name-letter addition the schedule grows from 20 to 22 rounds. A soft "no two consecutive same" pass varies the cadence.
 - Each round records a real `targetAttempts` / `targetCorrect` event; nothing is synthetically pre-marked.
 - Distractor selection during calibration uses `ConfusionPolicy.avoid` (no B/D, M/W, P/Q traps yet).
-- Calibration can stop after 10-12 rounds when confidence is already clear or fatigue appears; mixed evidence continues to the full 20.
+- Calibration can stop after 10-12 rounds when confidence is already clear or fatigue appears; mixed evidence continues to the full 20-22.
 - When calibration ends, the profile flips `hasCompletedCalibration = true` and is routed straight into `GameView`.
 
-A child who already knows most of these letters will exit calibration with several `LetterStat`s already at 2/2 or 4/5, and immediately enter the daily loop with a populated "known letters" set. A child who knows few will exit with mostly weak stats — but no harm done; the next session either shortens or skips warm-up based on the known-letter pool (see below).
+A child who already knows most of these letters will exit calibration with several `LetterStat`s already at 2/2 or 4/5, and immediately enter the daily loop with a populated "known letters" set. A child who knows few will exit with mostly weak stats — no harm done; the next session either shortens or skips warm-up based on the known-letter pool, and `nextFocusWithReason` re-teaches any 0/2 letter through the `staleWeakness` branch (the threshold is `targetAttempts >= 2` specifically so calibration evidence counts).
 
 ### 3. Daily session
 
@@ -682,7 +683,7 @@ This preserves three distinct concepts for maintainers:
 
 ### Visually confusing pairs (`ConfusionPolicy`)
 
-`LetterDifficulty.visuallyConfusingPairs` defines symmetric letter-to-letter pairs like B/D, M/W, P/Q, lowercase b/d, and structural pairs such as E/F or P/R/B. Directional non-letter lookalikes live separately in `visualOnlyDistractorsByTarget`: for example, `1` can be a distractor for `I` / `L`, and `rn` can be a distractor for `m`, but those tokens can never become targets themselves.
+`LetterDifficulty.visuallyConfusingPairs` defines symmetric letter-to-letter pairs like B/D, M/W, P/Q, lowercase b/d, structural pairs such as E/F or P/R/B, and Czech base/diacritic contrasts such as C/Č, R/Ř, and E/É. Directional non-letter lookalikes live separately in `visualOnlyDistractorsByTarget`: for example, `1` can be a distractor for `I` / `L`, and `rn` can be a distractor for `m`, but those tokens can never become targets themselves. Base/diacritic edges are used for distractor gating without making base letters depend on future diacritic mastery; diacritics still use `diacriticBase` for the base-before-mark prerequisite.
 
 The treatment is **phase- and band-dependent** via `LetterDifficulty.ConfusionPolicy` plus the frozen `instructionalBand.confusionStage`:
 

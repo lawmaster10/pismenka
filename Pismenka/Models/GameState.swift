@@ -2215,7 +2215,10 @@ final class AdaptiveGameState: ObservableObject {
     ) {
         let fallback = fallbackCandidates
             + profile.lettersByConfidence
-            + LetterDifficulty.calibrationPool(for: language)
+            + LetterDifficulty.calibrationPool(
+                for: language,
+                nameLetter: profile.firstNameLetterKey
+            )
             + language.letters
         targetLetter = ([candidate] + fallback).first {
             LetterDifficulty.isEligibleTarget($0, language: language)
@@ -2362,7 +2365,10 @@ final class AdaptiveGameState: ObservableObject {
             // No known letters and no focus — extremely unusual (would mean a
             // profile that finished calibration without success). Pick anything
             // from the calibration pool to avoid a deadlocked screen.
-            let pool = LetterDifficulty.calibrationPool(for: language)
+            let pool = LetterDifficulty.calibrationPool(
+                for: language,
+                nameLetter: profile.firstNameLetterKey
+            )
             let targetCandidate = pool.randomElement() ?? "A"
             setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: pool)
             let target = targetLetter
@@ -3223,7 +3229,10 @@ final class AdaptiveGameState: ObservableObject {
                 && !caseVariantSet.contains(letter)
                 && !LetterDifficulty.isVisualOnlyDistractor(letter)) ? letter : nil
         })
-        let calibrationPool = Set(LetterDifficulty.calibrationPool(for: language))
+        let calibrationPool = Set(LetterDifficulty.calibrationPool(
+                for: language,
+                nameLetter: profile.firstNameLetterKey
+            ))
             .subtracting(known).subtracting(attempted)
         let otherIntroduced = profile.introducedLetters
             .subtracting(known).subtracting(caseVariantSet).subtracting(attempted).subtracting(calibrationPool)

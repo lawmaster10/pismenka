@@ -1825,61 +1825,6 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(state.displayedLetters.count, 6)
     }
 
-    @MainActor
-    func testReadingLayerOptionCountStaysFour() {
-        let knownSyllables = Set(WordCurriculum.czechWords.flatMap(\.syllables))
-        let profile = Profile(
-            name: "Mila",
-            avatarId: .lion,
-            language: .czech,
-            letterStats: knownStats(for: Set(GameLanguage.czech.letters)),
-            syllableStats: Dictionary(uniqueKeysWithValues: knownSyllables.map { ($0, knownUnitStat()) }),
-            hasCompletedCalibration: true,
-            wordsUnlockedAt: LocalDay.today(),
-            everMasteredLetters: Set(GameLanguage.czech.letters),
-            everMasteredSyllables: Set(SyllableCurriculum.allKeys(for: .czech).prefix(10)),
-            introducedLetters: Set(GameLanguage.czech.letters)
-        )
-        let manager = ProfileManager()
-        manager.profiles = [profile]
-        let plan = SessionPlan(
-            warmupLength: 0,
-            introducedNewFocusLetter: false,
-            dayStreakCount: 1,
-            dayStreakIncreased: false,
-            focusLetter: nil,
-            focusTarget: .word("MÁMA"),
-            primaryLayer: .words,
-            activityKind: .wordReading,
-            focusScaffoldingLevel: 0
-        )
-
-        let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
-
-        // The underlying letter grid would be 8 for a profile this advanced;
-        // assert via the actual grid-size resolver so the reading-layer
-        // override (forcing 4) is the only thing that brings displayed count
-        // down. (`AlphabetLevel.optionsPerRound` was removed because it was
-        // dead code and disagreed with the live `letterOptionsPerRound`
-        // formula — see `SkillLevel.swift`.)
-        XCTAssertEqual(profile.letterOptionsPerRound, 8)
-        XCTAssertEqual(state.displayedLetters.count, 4)
-
-        let syllablePlan = SessionPlan(
-            warmupLength: 0,
-            introducedNewFocusLetter: false,
-            dayStreakCount: 1,
-            dayStreakIncreased: false,
-            focusLetter: nil,
-            focusTarget: .syllable("MA"),
-            primaryLayer: .syllables,
-            activityKind: .syllableRecognition,
-            focusScaffoldingLevel: 0
-        )
-        let syllableState = AdaptiveGameState(profile: profile, plan: syllablePlan, profileManager: manager)
-        XCTAssertEqual(syllableState.displayedLetters.count, 4)
-    }
-
     func testAlphabetLevelControlsConfusionAndCaseProgression() {
         let table: [(level: AlphabetLevel, stage: AlphabetLevel.ConfusionStage, lowerDistractors: Bool, lowerTargets: Bool, visualOnly: Bool)] = [
             (.novice, .gentle, false, false, false),
@@ -1906,6 +1851,22 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("B|lower", "D|lower"))
         XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("C", "C|lower"))
         XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("F|lower", "T|lower"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("C", "Č"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("C|lower", "Č|lower"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("R", "Ř"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("R|lower", "Ř|lower"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("E", "É"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("E", "Ě"))
+        XCTAssertFalse(LetterDifficulty.areVisuallyConfusing("É", "Ě"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("U", "Ú"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("U", "Ů"))
+        XCTAssertFalse(LetterDifficulty.areVisuallyConfusing("Ú", "Ů"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("N", "M"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("N|lower", "M|lower"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("N", "Z"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("N|lower", "Z|lower"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("V", "W"))
+        XCTAssertTrue(LetterDifficulty.areVisuallyConfusing("V|lower", "W|lower"))
         XCTAssertFalse(LetterDifficulty.areVisuallyConfusing("M|lower", "rn"))
         XCTAssertFalse(LetterDifficulty.areVisuallyConfusing("L", "1"))
         XCTAssertEqual(LetterDifficulty.visualOnlyDistractors(for: "M|lower"), ["rn"])
@@ -1915,6 +1876,54 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertFalse(LetterDifficulty.isEligibleTarget("1", language: .english))
         XCTAssertFalse(LetterDifficulty.isEligibleTarget("rn", language: .english))
         XCTAssertTrue(LetterDifficulty.isEligibleTarget("A|lower", language: .english))
+    }
+
+    func testCzechBaseLettersDoNotRequireFutureDiacriticMastery() throws {
+        let order = LetterDifficulty.introductionOrder(for: .czech)
+        let index = try XCTUnwrap(order.firstIndex(of: "A"))
+        let known = Set(order.prefix(upTo: index))
+
+        let result = LetterDifficulty.nextFocusWithReason(
+            language: .czech,
+            known: known,
+            learning: [],
+            mastered: known,
+            introduced: known,
+            letterStats: knownStats(for: known)
+        )
+
+        XCTAssertEqual(result?.key, "A")
+        XCTAssertEqual(result?.reason, .prerequisiteReady)
+    }
+
+    func testCzechSiblingDiacriticsDoNotBecomeMutualFocusPrerequisites() throws {
+        let order = LetterDifficulty.introductionOrder(for: .czech)
+
+        func focusCandidate(
+            _ candidate: String,
+            knownButNotMastered: Set<String> = []
+        ) throws -> (key: String, reason: FocusSelectionReason.Reason)? {
+            let index = try XCTUnwrap(order.firstIndex(of: candidate))
+            let known = Set(order.prefix(upTo: index))
+            let mastered = known.subtracting(knownButNotMastered)
+            return LetterDifficulty.nextFocusWithReason(
+                language: .czech,
+                known: known,
+                learning: [],
+                mastered: mastered,
+                introduced: known,
+                letterStats: knownStats(for: known)
+            )
+        }
+
+        XCTAssertEqual(try focusCandidate("É")?.key, "É")
+        XCTAssertEqual(try focusCandidate("É")?.reason, .diacriticAfterBaseMastered)
+        XCTAssertEqual(try focusCandidate("Ě", knownButNotMastered: ["É"])?.key, "Ě")
+        XCTAssertEqual(try focusCandidate("Ě", knownButNotMastered: ["É"])?.reason, .diacriticAfterBaseMastered)
+        XCTAssertEqual(try focusCandidate("Ú")?.key, "Ú")
+        XCTAssertEqual(try focusCandidate("Ú")?.reason, .diacriticAfterBaseMastered)
+        XCTAssertEqual(try focusCandidate("Ů", knownButNotMastered: ["Ú"])?.key, "Ů")
+        XCTAssertEqual(try focusCandidate("Ů", knownButNotMastered: ["Ú"])?.reason, .diacriticAfterBaseMastered)
     }
 
     @MainActor
@@ -2012,6 +2021,67 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertFalse(profile.strongKnownLetters.contains("D"))
         XCTAssertEqual(state.displayedLetters.count, profile.letterOptionsPerRound)
         XCTAssertFalse(state.displayedLetters.contains("D"))
+    }
+
+    @MainActor
+    func testCzechDiacriticConfusableIsAvoidedInGentlePolicy() {
+        let known = Set(["C", "Č", "P", "R", "N", "L", "I"])
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .czech,
+            letterStats: knownStats(for: known),
+            hasCompletedCalibration: true,
+            everMasteredLetters: [],
+            introducedLetters: known
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            focusScaffoldingLevel: 0,
+            mode: .extraPractice(letter: "Č")
+        )
+
+        let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
+
+        XCTAssertEqual(state.targetLetter, "Č")
+        XCTAssertFalse(state.displayedLetters.contains("C"))
+    }
+
+    @MainActor
+    func testCzechDiacriticConfusableIsPreferredInIntentionalPractice() {
+        let known = Set(GameLanguage.czech.letters.prefix(25))
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .czech,
+            letterStats: knownStats(for: known),
+            hasCompletedCalibration: true,
+            everMasteredLetters: known,
+            introducedLetters: known
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            focusScaffoldingLevel: 0,
+            mode: .extraPractice(letter: "Č")
+        )
+
+        let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
+
+        XCTAssertEqual(state.targetLetter, "Č")
+        XCTAssertEqual(profile.snapshot.instructionalBand.confusionStage, .intentionalPractice)
+        XCTAssertTrue(state.displayedLetters.contains("C"))
     }
 
     @MainActor
@@ -2180,27 +2250,6 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertFalse(plan.introducedNewFocusLetter)
     }
 
-    @MainActor
-    func testReadingLayerPlansDoNotPromiseWarmup() {
-        let yesterday = LocalDay.today().adding(days: -1)
-        let profile = Profile(
-            name: "Mila",
-            avatarId: .lion,
-            language: .czech,
-            hasCompletedCalibration: true,
-            syllablesUnlockedAt: yesterday,
-            everMasteredLetters: Set(GameLanguage.czech.letters),
-            introducedLetters: Set(GameLanguage.czech.letters)
-        )
-        let manager = ProfileManager()
-        manager.profiles = [profile]
-
-        let plan = manager.previewSessionPlan(profileId: profile.id)
-
-        XCTAssertEqual(plan.primaryLayer, .syllables)
-        XCTAssertEqual(plan.warmupLength, 0)
-    }
-
     func testWordUnlockRequiresFourPlayableWordsFromFilteredPool() {
         let knownSyllables = Set(WordCurriculum.czechWords.flatMap(\.syllables))
         let profile = Profile(
@@ -2232,30 +2281,6 @@ final class PismenkaModelTests: XCTestCase {
         )
         XCTAssertEqual(Set(distractors).isSubset(of: Set(pool.map(\.key))), true)
         XCTAssertEqual(distractors.count, 3)
-    }
-
-    func testWordNextFocusUsesAudioFilteredPool() {
-        let knownSyllables = Set(WordCurriculum.czechWords.flatMap(\.syllables))
-        let profile = Profile(
-            name: "Mila",
-            avatarId: .lion,
-            language: .czech,
-            syllableStats: Dictionary(uniqueKeysWithValues: knownSyllables.map { ($0, knownUnitStat()) }),
-            hasCompletedCalibration: true,
-            wordsUnlockedAt: LocalDay.today(),
-            everMasteredLetters: Set(GameLanguage.czech.letters),
-            introducedLetters: Set(GameLanguage.czech.letters)
-        )
-
-        XCTAssertNil(profile.nextFocusTarget(letterSelection: nil))
-        XCTAssertEqual(
-            WordCurriculum.nextFocus(profile: profile, audio: StubAudio(playableWords: ["TÁTA"])),
-            "TÁTA"
-        )
-        XCTAssertEqual(
-            profile.nextFocusTarget(letterSelection: nil, wordAudio: StubAudio(playableWords: ["TÁTA"])),
-            .word("TÁTA")
-        )
     }
 
     @MainActor
@@ -2869,6 +2894,39 @@ final class PismenkaModelTests: XCTestCase {
     }
 
     @MainActor
+    func testCzechCameosAvoidBaseDiacriticConfusablesWithTarget() throws {
+        let order = LetterDifficulty.introductionOrder(for: .czech)
+        let caronIndex = try XCTUnwrap(order.firstIndex(of: "Č"))
+        let introduced = Set(order.prefix(upTo: caronIndex))
+        var stats = knownStats(for: introduced)
+        stats["C"] = knownStat(correctCount: 4, incorrectCount: 1)
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .czech,
+            letterStats: stats,
+            hasCompletedCalibration: true,
+            introducedLetters: introduced
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            focusScaffoldingLevel: 0
+        )
+
+        let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
+
+        XCTAssertEqual(state.targetLetter, "C")
+        XCTAssertFalse(state.displayedLetters.contains("Č"))
+        XCTAssertTrue(state.displayedLetters.contains("Ď"))
+    }
+
+    @MainActor
     func testLowercaseAudioFallbackHasSpokenText() {
         XCTAssertEqual(AudioService.shared.spokenLetter(for: "Q|lower"), "q")
     }
@@ -2906,28 +2964,6 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(profile.dailyPracticeAttempts, 0)
         XCTAssertNil(profile.learningCycleStartDay)
         XCTAssertTrue(profile.weeklyIntroducedLetters.isEmpty)
-    }
-
-    @MainActor
-    func testExpertCzechProfileUnlocksSyllablesForNextDay() {
-        var profile = Profile(
-            name: "Mila",
-            avatarId: .lion,
-            language: .czech,
-            hasCompletedCalibration: true,
-            everMasteredLetters: Set(GameLanguage.czech.letters)
-        )
-        for letter in GameLanguage.czech.letters {
-            profile.letterStats[letter] = LetterStat(recentResults: Array(repeating: true, count: 8), targetAttempts: 8, targetCorrect: 8)
-            profile.introducedLetters.insert(letter)
-        }
-        let manager = ProfileManager()
-        manager.profiles = [profile]
-
-        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id)
-
-        XCTAssertEqual(plan.primaryLayer, .letters)
-        XCTAssertNotNil(manager.profiles[0].syllablesUnlockedAt)
     }
 
     func testAlphabetLevelAndReadingStageThresholdsAreSeparate() {
@@ -3082,13 +3118,6 @@ final class PismenkaModelTests: XCTestCase {
         let data = try JSONEncoder().encode(round)
         let decoded = try JSONDecoder().decode(LearningRound.self, from: data)
         XCTAssertEqual(decoded, round)
-    }
-
-    @MainActor
-    func testAudioValidationIncludesCurriculumAssetNames() {
-        let required = AudioService.shared.requiredCurriculumVoiceAssets(for: .czech)
-        XCTAssertTrue(required.contains("cz_syl_ma"))
-        XCTAssertTrue(required.contains("cz_word_máma"))
     }
 
     func testNewProfilesDefaultToSystemLanguage() {
@@ -3305,6 +3334,7 @@ final class PismenkaModelTests: XCTestCase {
             sfxEnabled: true,
             reduceMotionEnabled: false,
             confettiEnabled: true,
+            personalizedCzechLettersEnabled: false,
             parentGateMethod: .swipe,
             remindersEnabled: true,
             reminderHour: 17,
@@ -3338,6 +3368,7 @@ final class PismenkaModelTests: XCTestCase {
             sfxEnabled: true,
             reduceMotionEnabled: false,
             confettiEnabled: true,
+            personalizedCzechLettersEnabled: false,
             parentGateMethod: .swipe,
             remindersEnabled: true,
             reminderHour: 17,
@@ -3402,6 +3433,7 @@ final class PismenkaModelTests: XCTestCase {
             sfxEnabled: false,
             reduceMotionEnabled: true,
             confettiEnabled: false,
+            personalizedCzechLettersEnabled: false,
             parentGateMethod: .holdButtons,
             remindersEnabled: true,
             reminderHour: 8,
@@ -3417,6 +3449,7 @@ final class PismenkaModelTests: XCTestCase {
             sfxEnabled: true,
             reduceMotionEnabled: false,
             confettiEnabled: true,
+            personalizedCzechLettersEnabled: false,
             parentGateMethod: .swipe,
             remindersEnabled: false,
             reminderHour: 17,

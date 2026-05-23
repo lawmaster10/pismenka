@@ -4,8 +4,10 @@
 //
 //  One-time calibration that runs the very first time a profile enters the
 //  game. It can stop early after a clear 10-12 round read, otherwise it keeps
-//  going up to 20 rounds drawn from a 10-letter pool (9 starter-familiar + 1
-//  next-pedagogical) so the kid starts on letters they likely already know.
+//  going up to ~20-22 rounds drawn from a generalized early-recognition pool
+//  (`LetterDifficulty.earlyRecognitionLetters` plus the first letter of the
+//  child's name when it isn't already in that set), so the kid starts on
+//  letters most preschoolers know first and on a personally meaningful one.
 //  Records every answer through `ProfileManager.recordAnswer` so `isKnown` is
 //  determined by real performance, never assumed.
 //
@@ -303,7 +305,10 @@ struct CalibrationView: View {
             return false
         }
 
-        let pool = Set(LetterDifficulty.calibrationPool(for: profile.language))
+        let pool = Set(LetterDifficulty.calibrationPool(
+            for: profile.language,
+            nameLetter: profile.firstNameLetterKey
+        ))
         guard snapshot.schedule.allSatisfy({ pool.contains($0) }) else { return false }
 
         if snapshot.showFinale || snapshot.currentIndex == snapshot.schedule.count {
@@ -319,30 +324,49 @@ struct CalibrationView: View {
     }
 
     private func buildSchedule() {
-        let pool = LetterDifficulty.calibrationPool(for: profile.language)
-        let starter = LetterDifficulty.starterFamiliar
-        let nonFamiliar = pool.first(where: { !starter.contains($0) }) ?? "P"
+        let pool = LetterDifficulty.calibrationPool(
+            for: profile.language,
+            nameLetter: profile.firstNameLetterKey
+        )
+        let nameLetter = LetterDifficulty.nameLetterForCalibration(
+            profile.firstNameLetterKey,
+            language: profile.language
+        )
 
-        // First 9 rounds: one occurrence of each starter-familiar letter, shuffled.
-        var opener = starter.shuffled()
+        // Every pool letter appears exactly twice. With the standard 10-letter
+        // pool that's 20 rounds; when the child's name letter adds an 11th,
+        // it's 22. Early-stop logic in `shouldStopCalibrationEarly` wraps
+        // things up after ~10-12 rounds when confidence is already clear, so
+        // the extra two rounds only show for kids whose evidence is genuinely
+        // mixed.
+        var draft = (pool + pool).shuffled()
 
-        // Remaining 11 rounds: 1 more of each starter-familiar (= 9) + 2 of the
-        // non-familiar = 11. Shuffled with a soft "no two consecutive same" rule.
-        var remainder = starter + [nonFamiliar, nonFamiliar]
-        remainder.shuffle()
-        for i in 1..<remainder.count {
-            if remainder[i] == remainder[i - 1] {
-                if let swapIndex = (i + 1..<remainder.count).first(where: { remainder[$0] != remainder[i - 1] }) {
-                    remainder.swapAt(i, swapIndex)
+        // Soft "no two consecutive same" pass — keeps the cadence varied
+        // without forcing a strict permutation (which would over-constrain
+        // the small pool and bias toward a predictable pattern).
+        for i in 1..<draft.count {
+            if draft[i] == draft[i - 1] {
+                if let swapIndex = (i + 1..<draft.count).first(where: { draft[$0] != draft[i - 1] }) {
+                    draft.swapAt(i, swapIndex)
                 }
             }
         }
 
-        schedule = opener + remainder
+        // Front-load the child's name letter so the very first round is a
+        // personally meaningful, high-confidence prompt — only if doing so
+        // doesn't immediately create a consecutive duplicate at position 1.
+        if let nameLetter,
+           draft.count >= 2,
+           draft.first != nameLetter,
+           draft[1] != nameLetter,
+           let nameIndex = draft.firstIndex(of: nameLetter) {
+            draft.swapAt(0, nameIndex)
+        }
+
+        schedule = draft
         if let first = schedule.first {
             displayedLetters = buildOptions(target: first, pool: pool)
         }
-        opener.removeAll()
     }
 
     private func buildOptions(target: String, pool: [String]) -> [String] {
@@ -418,7 +442,10 @@ struct CalibrationView: View {
             withAnimation { showFinale = true }
             return
         }
-        let pool = LetterDifficulty.calibrationPool(for: profile.language)
+        let pool = LetterDifficulty.calibrationPool(
+            for: profile.language,
+            nameLetter: profile.firstNameLetterKey
+        )
         displayedLetters = buildOptions(target: schedule[currentIndex], pool: pool)
         persistCalibrationCheckpoint()
         playPrompt(after: 0.3)
