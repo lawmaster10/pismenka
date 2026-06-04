@@ -7,6 +7,7 @@
 //  entry point in ProfileSelectView.
 //
 
+import AuthenticationServices
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
@@ -91,7 +92,9 @@ struct SettingsView: View {
                             FirebaseBackupStatusRow(
                                 status: firebaseBackupService.status,
                                 signedInEmail: firebaseBackupService.signedInEmail,
-                                onSignIn: { firebaseBackupService.signInWithGoogle() },
+                                onAppleRequest: firebaseBackupService.configureAppleSignInRequest,
+                                onAppleCompletion: firebaseBackupService.handleAppleSignInCompletion,
+                                onGoogleSignIn: { firebaseBackupService.signInWithGoogle() },
                                 onSignOut: { firebaseBackupService.signOut() },
                                 onBackupNow: { firebaseBackupService.backupNow() },
                                 onRestoreNow: { firebaseBackupService.restoreNow() }
@@ -565,7 +568,9 @@ struct PickerRow<Option>: View where Option: CaseIterable & Identifiable & Hasha
 struct FirebaseBackupStatusRow: View {
     let status: FirebaseBackupStatus
     let signedInEmail: String?
-    let onSignIn: () -> Void
+    let onAppleRequest: (ASAuthorizationAppleIDRequest) -> Void
+    let onAppleCompletion: (Result<ASAuthorization, Error>) -> Void
+    let onGoogleSignIn: () -> Void
     let onSignOut: () -> Void
     let onBackupNow: () -> Void
     let onRestoreNow: () -> Void
@@ -583,7 +588,7 @@ struct FirebaseBackupStatusRow: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Google recovery")
+                    Text("Cloud recovery")
                         .font(.brandBody(16, weight: .black))
                         .foregroundColor(.ink)
                     Text(subtitle)
@@ -604,14 +609,22 @@ struct FirebaseBackupStatusRow: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 18, weight: .black))
                         .foregroundColor(.leaf)
-                        .accessibilityLabel("Google backup is up to date")
+                        .accessibilityLabel("Cloud backup is up to date")
                 }
             }
 
             HStack(spacing: 10) {
                 if signedInEmail == nil {
-                    Button("Sign in with Google", action: onSignIn)
-                        .buttonStyle(BrandPrimaryButtonStyle())
+                    SignInWithAppleButton(
+                        .signIn,
+                        onRequest: onAppleRequest,
+                        onCompletion: onAppleCompletion
+                    )
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(width: 210, height: 44)
+
+                    Button("Sign in with Google", action: onGoogleSignIn)
+                        .buttonStyle(BrandSecondaryButtonStyle())
                 } else {
                     Button("Sync now", action: onBackupNow)
                         .buttonStyle(BrandSecondaryButtonStyle())
@@ -674,15 +687,15 @@ struct FirebaseBackupStatusRow: View {
         case .signedOut:
             return "Sign in to back up progress and restore it after reinstall."
         case .syncing:
-            return "Syncing Google backup."
+            return "Syncing cloud backup."
         case .synced(let date):
             return "Up to date. Last backed up \(Self.shortDateFormatter.string(from: date))."
         case .restored(let date):
             return "Restored and up to date from \(Self.shortDateFormatter.string(from: date))."
         case .tooLarge:
-            return "Progress is too large for automatic Google backup. Export backup still works."
+            return "Progress is too large for automatic cloud backup. Export backup still works."
         case .offline:
-            return "No internet connection. Google recovery will retry when you're back online."
+            return "No internet connection. Cloud recovery will retry when you're back online."
         case .failed(let message):
             return message
         }

@@ -3,15 +3,18 @@
 //  Pismenka
 //
 //  Mirrors the local JSON-backed profile store into Firestore so reinstalling
-//  and signing in with the same Google account can recover long-lived progress.
+//  and signing in with the same cloud account can recover long-lived progress.
 //
 
+import AuthenticationServices
+import CryptoKit
 import FirebaseAuth
 import FirebaseCore
 import FirebaseFirestore
 import Foundation
 import GoogleSignIn
 import Network
+import Security
 import UIKit
 
 enum FirebaseBootstrap {
@@ -80,6 +83,7 @@ final class FirebaseBackupService: ObservableObject {
     private var hasStartedNetworkMonitor = false
     private var networkStatus: NWPath.Status = .requiresConnection
     private var isApplyingCloudSnapshot = false
+    private var currentAppleNonce: String?
 
     var isSignedIn: Bool { signedInEmail != nil }
     private var isNetworkAvailable: Bool { networkStatus == .satisfied }
@@ -177,6 +181,76 @@ final class FirebaseBackupService: ObservableObject {
             let credential = GoogleAuthProvider.credential(
                 withIDToken: idToken,
                 accessToken: user.accessToken.tokenString
+            )
+            Auth.auth().signIn(with: credential) { _, error in
+                Task { @MainActor in
+                    if let error {
+                        self.status = .failed(error.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
+    func configureAppleSignInRequest(_ request: ASAuthorizationAppleIDRequest) {
+        guard FirebaseBootstrap.isConfigured else {
+            currentAppleNonce = nil
+            status = .notConfigured
+            return
+        }
+        guard isNetworkAvailable else {
+            currentAppleNonce = nil
+            status = .offline
+            return
+        }
+
+        let nonce = Self.randomNonceString()
+        currentAppleNonce = nonce
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = Self.sha256(nonce)
+        status = .syncing
+    }
+
+    func handleAppleSignInCompletion(_ result: Result<ASAuthorization, Error>) {
+        defer { currentAppleNonce = nil }
+
+        guard FirebaseBootstrap.isConfigured else {
+            status = .notConfigured
+            return
+        }
+        guard isNetworkAvailable else {
+            status = .offline
+            return
+        }
+
+        switch result {
+        case .failure(let error):
+            if let authorizationError = error as? ASAuthorizationError,
+               authorizationError.code == .canceled {
+                status = Auth.auth().currentUser == nil ? .signedOut : status
+            } else {
+                status = .failed(error.localizedDescription)
+            }
+
+        case .success(let authorization):
+            guard let appleCredential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+                status = .failed("Apple sign-in did not return an Apple ID credential.")
+                return
+            }
+            guard let nonce = currentAppleNonce else {
+                status = .failed("Apple sign-in couldn't verify the request.")
+                return
+            }
+            guard let identityToken = appleCredential.identityToken,
+                  let idTokenString = String(data: identityToken, encoding: .utf8) else {
+                status = .failed("Apple sign-in did not return an identity token.")
+                return
+            }
+
+            let credential = OAuthProvider.appleCredential(
+                withIDToken: idTokenString,
+                rawNonce: nonce,
+                fullName: appleCredential.fullName
             )
             Auth.auth().signIn(with: credential) { _, error in
                 Task { @MainActor in
@@ -290,7 +364,7 @@ final class FirebaseBackupService: ObservableObject {
         do {
             let fields = try Self.backupDocumentFields(for: envelope)
             guard let payloadBytes = fields["payloadBytes"] as? Int else {
-                status = .failed("Písmenka couldn't prepare the Google backup.")
+                status = .failed("Písmenka couldn't prepare the cloud backup.")
                 return
             }
             guard payloadBytes <= Self.maxPayloadBytes else {
@@ -348,7 +422,7 @@ final class FirebaseBackupService: ObservableObject {
 
             let envelope = try Self.decodePayload(payload)
             guard envelope.schemaVersion == CloudBackupEnvelope.currentSchemaVersion else {
-                status = .failed("This Google backup was made by an unsupported version.")
+                status = .failed("This cloud backup was made by an unsupported version.")
                 return
             }
 
@@ -477,6 +551,36 @@ final class FirebaseBackupService: ObservableObject {
             .flatMap(\.windows)
             .first { $0.isKeyWindow }?
             .rootViewController
+    }
+
+    private nonisolated static func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        let charset = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remainingLength = length
+
+        while remainingLength > 0 {
+            var randoms = [UInt8](repeating: 0, count: 16)
+            let status = SecRandomCopyBytes(kSecRandomDefault, randoms.count, &randoms)
+            guard status == errSecSuccess else {
+                fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(status)")
+            }
+
+            for random in randoms where remainingLength > 0 {
+                if random < UInt8(charset.count) {
+                    result.append(charset[Int(random)])
+                    remainingLength -= 1
+                }
+            }
+        }
+
+        return result
+    }
+
+    private nonisolated static func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        return hashedData.map { String(format: "%02x", $0) }.joined()
     }
 
     nonisolated static func mergedProfiles(local: [Profile], cloud: [Profile]) -> CloudBackupMergeResult {
