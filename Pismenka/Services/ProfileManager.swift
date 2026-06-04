@@ -781,8 +781,23 @@ class ProfileManager: ObservableObject {
 
     func claimDailyPracticeWinner(profileId: UUID, milestone: Int) {
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
-        profiles[index].claimDailyPracticeWinner(milestone: milestone)
-        profiles[index].markModified()
+        var profile = profiles[index]
+        profile.claimDailyPracticeWinner(milestone: milestone)
+        // Reaching the visible daily goal on a weekly-test day finalizes the
+        // test. The progress bar counts every round (warmup, rescue, filler
+        // review), so a child can reach the goal (e.g. 40/40) without the
+        // audit's independent-evidence quota being met. Without finalizing
+        // here, the test stayed "active" and reopened the next day seeded from
+        // the lower independent-attempt count (e.g. 35/40), forcing a manual
+        // end. A claimable milestone is always a full multiple of the goal, so
+        // milestone >= dailyGoalTarget means the bar genuinely hit the goal.
+        if let assessment = profile.activeWeeklyAssessment,
+           !assessment.isCompleted,
+           milestone >= assessment.dailyGoalTarget {
+            finalizeActiveWeeklyAssessment(profile: &profile, today: LocalDay.today())
+        }
+        profile.markModified()
+        profiles[index] = profile
         saveProfilesImmediately()
     }
 
@@ -947,7 +962,20 @@ class ProfileManager: ObservableObject {
         }
         profile.letterStats[letter] = stat
         if asTarget && countsTowardDailyPractice {
-            profile.recordDailyPracticeAttempt()
+            // Only correct answers advance the ordinary daily goal, so a wrong
+            // tap (including a deliberate one) earns no credit toward the Winner
+            // button. The weekly review/test is the exception: it is a
+            // fixed-length audit, so every answered round counts toward it. An
+            // active weekly assessment is present exactly on review/test days
+            // (it is committed before the first answer), which is the signal we
+            // use to relax the correct-answer requirement here.
+            //
+            // Assessment evidence below is still recorded for both correct and
+            // incorrect answers regardless — the audit needs to see misses.
+            let isWeeklyReviewTest = profile.activeWeeklyAssessment != nil
+            if wasCorrect || isWeeklyReviewTest {
+                profile.recordDailyPracticeAttempt()
+            }
             if context == .independent,
                shouldCountForLearning,
                intent == .weeklyAssessment {
@@ -1068,7 +1096,7 @@ class ProfileManager: ObservableObject {
     }
 
     private func completeWeeklyAssessmentIfNeeded(profile: inout Profile, today: LocalDay) {
-        guard var assessment = profile.activeWeeklyAssessment,
+        guard let assessment = profile.activeWeeklyAssessment,
               !assessment.isCompleted else {
             return
         }
@@ -1082,6 +1110,19 @@ class ProfileManager: ObservableObject {
                 || (assessment.hasCoveredEveryLetter && assessment.independentAssessmentAttempts >= assessment.hardRoundCap)
         }
         guard shouldComplete else { return }
+        finalizeActiveWeeklyAssessment(profile: &profile, today: today)
+    }
+
+    /// Stamps the active weekly assessment as completed, archives a copy into
+    /// history, and resets the learning cycle so the next local day starts a
+    /// fresh introduction cycle. The active assessment is intentionally left in
+    /// place (not cleared) so a same-day "play again" still works as filler
+    /// review; the next-day rollover in `resolveDailyPractice` clears it.
+    private func finalizeActiveWeeklyAssessment(profile: inout Profile, today: LocalDay) {
+        guard var assessment = profile.activeWeeklyAssessment,
+              !assessment.isCompleted else {
+            return
+        }
         assessment.complete(on: today)
         profile.activeWeeklyAssessment = assessment
         profile.recentWeeklyAssessments.append(assessment)
@@ -1198,7 +1239,7 @@ class ProfileManager: ObservableObject {
                     }
                 }
                 profile.introducedSyllables.insert(syllable)
-                if countsTowardDailyPractice {
+                if countsTowardDailyPractice && wasCorrect {
                     profile.recordDailyPracticeAttempt()
                 }
             } else {
@@ -1246,7 +1287,7 @@ class ProfileManager: ObservableObject {
                     }
                 }
                 profile.introducedWords.insert(word)
-                if countsTowardDailyPractice {
+                if countsTowardDailyPractice && wasCorrect {
                     profile.recordDailyPracticeAttempt()
                 }
             } else {

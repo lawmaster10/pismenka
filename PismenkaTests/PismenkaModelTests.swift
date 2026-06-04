@@ -290,18 +290,18 @@ final class PismenkaModelTests: XCTestCase {
         )
         let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
 
-        state.roundsThisSession = 24
+        state.roundsCorrect = 24
         XCTAssertFalse(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalCount, 24)
         XCTAssertEqual(state.dailyGoalProgress, 0.96, accuracy: 0.0001)
 
-        state.roundsThisSession = 25
+        state.roundsCorrect = 25
         XCTAssertTrue(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalCount, 25)
         XCTAssertEqual(state.dailyGoalDisplayText, "25 / 25")
         XCTAssertEqual(state.dailyGoalProgress, 1.0, accuracy: 0.0001)
 
-        state.roundsThisSession = 30
+        state.roundsCorrect = 30
         XCTAssertTrue(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalCount, 25)
         XCTAssertEqual(state.dailyGoalTotalCount, 30)
@@ -328,11 +328,11 @@ final class PismenkaModelTests: XCTestCase {
         let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
 
         XCTAssertEqual(plan.dailyGoalStartCount, 10)
-        state.roundsThisSession = 14
+        state.roundsCorrect = 14
         XCTAssertFalse(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalCount, 24)
 
-        state.roundsThisSession = 15
+        state.roundsCorrect = 15
         XCTAssertTrue(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalCount, 25)
         XCTAssertEqual(state.dailyGoalDisplayText, "25 / 25")
@@ -373,16 +373,16 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(state.dailyGoalDisplayText, "+0")
         XCTAssertEqual(state.dailyGoalProgress, 0.0, accuracy: 0.0001)
 
-        state.roundsThisSession = 1
+        state.roundsCorrect = 1
         XCTAssertFalse(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalDisplayText, "+1")
         XCTAssertEqual(state.dailyGoalProgress, 0.04, accuracy: 0.0001)
 
-        state.roundsThisSession = 24
+        state.roundsCorrect = 24
         XCTAssertFalse(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalDisplayText, "+24")
 
-        state.roundsThisSession = 25
+        state.roundsCorrect = 25
         XCTAssertTrue(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalDisplayText, "+25")
         XCTAssertEqual(state.claimableDailyGoalMilestone, 50)
@@ -438,6 +438,8 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(Set(plan.weeklyReviewLetters), Set(["A", "B", "C", "D", "E"]))
         XCTAssertEqual(plan.weeklyReviewLetters.count, 5)
 
+        // Review/test days are the attempt-counted exception: every answered
+        // round advances the goal, so the bar is driven by `roundsThisSession`.
         state.roundsThisSession = 14
         XCTAssertFalse(state.hasCompletedDailyGoal)
         XCTAssertEqual(state.dailyGoalProgress, 14.0 / 15.0, accuracy: 0.0001)
@@ -1088,6 +1090,77 @@ final class PismenkaModelTests: XCTestCase {
     }
 
     @MainActor
+    func testReachingDailyGoalFinalizesWeeklyAssessmentEvenWithoutFullEvidence() throws {
+        // Regression: the visible daily progress bar counts every round
+        // (warmup, rescue, filler review), so a child can reach the goal
+        // (e.g. 40/40) and tap Winner while the audit's independent-evidence
+        // quota is still unmet. Previously the test stayed "active" and
+        // reopened the next day at the lower independent-attempt count,
+        // forcing a manual end. Claiming the Winner at the goal must now
+        // finalize the test.
+        let today = LocalDay.today()
+        let scheduled = mostRecentSunday(onOrBefore: today)
+        var retainedA = WeeklyAssessmentLetterResult(bucket: .cohort)
+        for _ in 0..<4 {
+            retainedA.recordIndependentAttempt(wasCorrect: true, responseTime: 1.0)
+        }
+        var partialB = WeeklyAssessmentLetterResult(bucket: .cohort)
+        partialB.recordIndependentAttempt(wasCorrect: true, responseTime: 1.0)
+        let assessment = WeeklyLetterAssessment(
+            scheduledFor: scheduled,
+            startedOn: scheduled,
+            cohortLetters: ["A", "B", "C"],
+            strategy: .adaptiveAudit,
+            assessmentRoundTarget: 12,
+            dailyGoalTarget: 13,
+            hardRoundCap: 13,
+            results: [
+                "A": retainedA,
+                "B": partialB,
+                "C": WeeklyAssessmentLetterResult(bucket: .cohort)
+            ]
+        )
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: ["A", "B", "C"]),
+            hasCompletedCalibration: true,
+            dailyPracticeDay: today,
+            dailyPracticeAttempts: 13,
+            activeWeeklyAssessment: assessment,
+            introducedLetters: ["A", "B", "C"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        // The audit is not resolved yet: letter "C" has no evidence.
+        XCTAssertFalse(manager.profiles[0].activeWeeklyAssessment?.isAssessmentResolved ?? true)
+        XCTAssertLessThan(
+            manager.profiles[0].activeWeeklyAssessment?.independentAssessmentAttempts ?? 0,
+            assessment.dailyGoalTarget
+        )
+
+        manager.claimDailyPracticeWinner(profileId: profile.id, milestone: assessment.dailyGoalTarget)
+
+        // The test is finalized in place (kept same-day for "play again"
+        // filler) and archived, and the learning cycle is reset.
+        XCTAssertEqual(manager.profiles[0].activeWeeklyAssessment?.completedOn, today)
+        let archived = try XCTUnwrap(manager.profiles[0].recentWeeklyAssessments.last)
+        XCTAssertEqual(archived.id, assessment.id)
+        XCTAssertEqual(archived.completedOn, today)
+        XCTAssertTrue(manager.profiles[0].weeklyIntroducedLetters.isEmpty)
+        XCTAssertEqual(manager.profiles[0].learningCycleStartDay, today)
+
+        // The next local day must not reopen the (now completed) test.
+        manager.profiles[0].dailyPracticeDay = today.adding(days: -1)
+        manager.profiles[0].activeWeeklyAssessment?.completedOn = today.adding(days: -1)
+        let nextDayPlan = manager.commitSessionStartIfNeeded(profileId: profile.id)
+        XCTAssertNotEqual(nextDayPlan.dailyPracticeKind, .reviewTest)
+        XCTAssertNil(manager.profiles[0].activeWeeklyAssessment)
+    }
+
+    @MainActor
     func testAdaptiveAssessmentRecordsOnlyWeeklyAssessmentIntent() throws {
         let today = LocalDay.today()
         let baseProfile = Profile(
@@ -1436,9 +1509,13 @@ final class PismenkaModelTests: XCTestCase {
         let manager = ProfileManager()
         manager.profiles = [profile]
 
+        // A correct round that does not opt into daily practice never counts.
         manager.recordAnswer(profileId: profile.id, letter: "A", wasCorrect: true, asTarget: true)
         XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 4)
 
+        // A wrong answer earns no daily-goal credit even when the round opts
+        // into daily practice — this closes the "tap wrong on purpose to reach
+        // the goal faster" loophole.
         manager.recordAnswer(
             profileId: profile.id,
             letter: "A",
@@ -1448,8 +1525,9 @@ final class PismenkaModelTests: XCTestCase {
             attemptContext: .independent,
             countsTowardDailyPractice: true
         )
-        XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 5)
+        XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 4)
 
+        // A correct round that opts into daily practice advances the counter.
         manager.recordAnswer(
             profileId: profile.id,
             letter: "A",
@@ -1458,10 +1536,61 @@ final class PismenkaModelTests: XCTestCase {
             attemptContext: .immediateRescue,
             countsTowardDailyPractice: true
         )
-        XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 6)
+        XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 5)
 
         manager.recordExposure(profileId: profile.id, letter: "B")
+        XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 5)
+    }
+
+    @MainActor
+    func testWeeklyReviewTestCountsEveryAnswerNotOnlyCorrectOnes() {
+        // The weekly review/test is the deliberate exception to the
+        // correct-only daily goal: it is a fixed-length retention audit, so a
+        // wrong answer must still advance the daily count (and therefore the
+        // visible bar / Winner) the way a correct one does.
+        let today = LocalDay.today()
+        let assessment = WeeklyLetterAssessment(
+            scheduledFor: mostRecentSunday(onOrBefore: today),
+            startedOn: today,
+            cohortLetters: ["A", "B"],
+            strategy: .adaptiveAudit
+        )
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: ["A", "B"]),
+            hasCompletedCalibration: true,
+            dailyPracticeDay: today,
+            dailyPracticeAttempts: 5,
+            activeWeeklyAssessment: assessment,
+            introducedLetters: ["A", "B"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        manager.recordAnswer(
+            profileId: profile.id,
+            letter: "A",
+            wasCorrect: false,
+            asTarget: true,
+            mistakeType: .confusion,
+            intent: .weeklyAssessment,
+            attemptContext: .independent,
+            countsTowardDailyPractice: true
+        )
         XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 6)
+
+        manager.recordAnswer(
+            profileId: profile.id,
+            letter: "A",
+            wasCorrect: true,
+            asTarget: true,
+            intent: .weeklyAssessment,
+            attemptContext: .independent,
+            countsTowardDailyPractice: true
+        )
+        XCTAssertEqual(manager.profiles[0].dailyPracticeAttempts, 7)
     }
 
     @MainActor
@@ -1548,7 +1677,7 @@ final class PismenkaModelTests: XCTestCase {
         let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
 
         XCTAssertEqual(state.dailyGoalCount, 7)
-        state.roundsThisSession = 18
+        state.roundsCorrect = 18
         XCTAssertTrue(state.hasCompletedDailyGoal)
 
         manager.recordAnswer(
@@ -1587,7 +1716,7 @@ final class PismenkaModelTests: XCTestCase {
         let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
 
         state.heartsRemaining = 0
-        state.roundsThisSession = 3
+        state.roundsCorrect = 3
 
         XCTAssertEqual(state.dailyGoalCount, 13)
         XCTAssertFalse(state.hasCompletedDailyGoal)
@@ -1823,6 +1952,66 @@ final class PismenkaModelTests: XCTestCase {
 
         XCTAssertEqual(profile.letterOptionsPerRound, 8)
         XCTAssertEqual(state.displayedLetters.count, 6)
+    }
+
+    @MainActor
+    func testCorrectAnswerNeverReEasesAfterDifficultyRecovery() throws {
+        // Regression: a correct answer must never make the grid harder. Hearts
+        // only fall within a session, so `heartsLow` is a sticky trip latch.
+        // Previously, the round right after a streak recovery re-tripped the
+        // governor purely from that latch, dropping the option count from 6
+        // back to 4 even though the child had just answered correctly.
+        let known = Set(GameLanguage.english.letters.prefix(16))
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: known),
+            hasCompletedCalibration: true,
+            everMasteredLetters: known
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            focusScaffoldingLevel: 0
+        )
+        let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
+
+        let baseOptionCount = state.displayedLetters.count
+        XCTAssertGreaterThan(baseOptionCount, 4)
+        XCTAssertEqual(state.liveDifficulty, .normal)
+
+        // Three genuine misses drop hearts to 2, tripping the governor easier.
+        for _ in 0..<3 {
+            let wrong = try XCTUnwrap(state.displayedLetters.first { $0 != state.targetLetter })
+            _ = state.processAnswer(wrong)
+            state.setupNewRound()
+        }
+        XCTAssertEqual(state.liveDifficulty, .easierUntilStreak)
+        XCTAssertEqual(state.heartsRemaining, 2)
+        XCTAssertLessThan(state.displayedLetters.count, baseOptionCount)
+
+        // Two correct answers walk the governor back to the full grid.
+        for _ in 0..<2 {
+            _ = state.processAnswer(state.targetLetter)
+            state.setupNewRound()
+        }
+        XCTAssertEqual(state.liveDifficulty, .normal)
+        XCTAssertEqual(state.displayedLetters.count, baseOptionCount)
+
+        // One more correct answer must NOT re-ease, even though hearts are
+        // still low. Before the fix this re-tripped straight back to the
+        // 4-grid for a single round.
+        _ = state.processAnswer(state.targetLetter)
+        state.setupNewRound()
+        XCTAssertEqual(state.liveDifficulty, .normal)
+        XCTAssertEqual(state.displayedLetters.count, baseOptionCount)
+        XCTAssertEqual(state.heartsRemaining, 2)
     }
 
     func testAlphabetLevelControlsConfusionAndCaseProgression() {

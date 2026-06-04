@@ -403,7 +403,18 @@ final class AdaptiveGameState: ObservableObject {
 
     var dailyGoalTotalCount: Int {
         guard plan.dailyGoalTarget > 0 else { return 0 }
-        return max(0, plan.dailyGoalStartCount + roundsThisSession)
+        // Ordinary daily practice only credits correct answers, so a wrong tap
+        // (deliberate or not) earns no progress toward the Winner button.
+        // `roundsThisSession` still drives warmup length, focus-appearance
+        // deadlines, and round indexing, so it counts every answered round;
+        // the ordinary daily goal instead tracks `roundsCorrect`.
+        //
+        // The weekly review/test is the deliberate exception: it is a
+        // fixed-length retention audit, so every answered round counts toward
+        // its goal whether right or wrong — completion is about *coverage*, not
+        // a correct-answer quota.
+        let progress = plan.dailyPracticeKind == .reviewTest ? roundsThisSession : roundsCorrect
+        return max(0, plan.dailyGoalStartCount + progress)
     }
 
     var dailyGoalCount: Int {
@@ -1456,7 +1467,16 @@ final class AdaptiveGameState: ObservableObject {
             return
         }
 
-        if tripTriggered {
+        // A correct answer must never make the grid harder. `heartsLow` and
+        // `focusAccuracyLow` are sticky latches (hearts only fall within a
+        // session and the focus accuracy is a slow cumulative average), so
+        // without the `!wasCorrect` guard the round right after a streak
+        // recovery would re-trip purely from a stale latch — producing the
+        // "got one right and the options dropped from 6 back to 4" flicker.
+        // Easing is a response to struggle, and a correct answer is not
+        // struggle; the next genuine miss will re-trip if the child is still
+        // having a hard time.
+        if tripTriggered, !wasCorrect {
             liveDifficulty = .easierUntilStreak
             governorEaseSteps = 1
             governorCorrectStreak = 0

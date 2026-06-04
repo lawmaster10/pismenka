@@ -10,8 +10,8 @@ The shipped app currently includes:
 
 - English and Czech letter recognition.
 - One-time per-profile calibration.
-- Daily adaptive letter practice with a visible Winner goal.
-- Sunday-or-next-played weekly letter review/test.
+- Daily adaptive letter practice with a visible Winner goal earned by correct answers.
+- Sunday-or-next-played weekly letter review/test that finalizes once its fixed question count is answered.
 - Parent dashboard, profile editing, per-letter overrides, and progress reset controls.
 - Bundled letter audio plus game sound effects.
 - Optional personalized Czech letter prompts unlocked in settings with code `2436`.
@@ -47,7 +47,19 @@ Daily play is letter-only:
 - Review rounds pull from known, weak, stale, and weekly assessment letters.
 - Expert profiles stay in mixed letter maintenance rather than moving into reading content.
 
+### Daily goal and Winner
+
+The progress strip fills toward a Winner milestone (25 on ordinary introduction days). Only **correct** answers advance the daily goal, so a wrong tap — deliberate or not — earns no progress toward the Winner button. Progress persists across same-day sessions, and running out of hearts ends the current sitting only; it does not reset or fail the day's goal.
+
+### Adaptive option grid
+
+The number of answer choices adapts to how the child is doing. When clear struggle shows up (a burst of misses, low hearts, or low focus accuracy) the grid eases one tier at a time (for example 8 → 6 → 4); two correct answers in a row walk it back up one tier at a time. A correct answer never makes the grid harder, so once a child recovers to a wider grid it stays there until they actually miss again.
+
+### Weekly review/test
+
 Weekly review/test remains letter-based. The app schedules a Sunday review once there are enough letters in the weekly cohort, and if the child misses Sunday the pending review runs on the next played day.
+
+The weekly test is the deliberate exception to the correct-only daily goal: it is a fixed-length retention audit, so **every** answered round counts toward its goal whether right or wrong (a wrong answer is still recorded as evidence and flags the letter for review). Reaching the goal — including tapping the Winner button at the end — finalizes the test, so it is marked complete and does not reopen the next day.
 
 ## Audio Assets
 

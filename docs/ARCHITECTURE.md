@@ -163,10 +163,12 @@ The daily goal is now a first-class `SessionPlan` contract, not an accidental by
 `AdaptiveGameState.dailyGoalTotalCount` is:
 
 ```
-max(0, plan.dailyGoalStartCount + roundsThisSession)
+max(0, plan.dailyGoalStartCount + roundsCorrect)
 ```
 
-`dailyGoalStartCount` comes from `Profile.dailyPracticeCount(on:)`, so a child can do 10 rounds in the morning, run out of hearts, come back later, and see `10 / 25` already filled. Hearts end the **current sitting** only; they do not reset or fail the daily goal.
+Only **correct** answers advance the *ordinary* daily goal. `roundsThisSession` still counts every answered round (it drives warm-up length, focus-appearance deadlines, and round indexing), but the visible bar tracks `roundsCorrect` so a wrong tap — deliberate or not — earns no progress toward the Winner button. The **weekly review/test (`.reviewTest`) is the deliberate exception**: it is a fixed-length retention audit, so the bar falls back to `roundsThisSession` and every answered round counts toward its goal whether right or wrong (completion is about *coverage*, not a correct-answer quota).
+
+`dailyGoalStartCount` comes from `Profile.dailyPracticeCount(on:)`, so a child can get 10 correct in the morning, run out of hearts, come back later, and see `10 / 25` already filled. Hearts end the **current sitting** only; they do not reset or fail the daily goal.
 
 After the first target is reached, the counter keeps going instead of stopping at `25 / 25` or the frozen review/test target. The visible count switches to extra rounds: `+1`, `+5`, `+25`, and so on. Tapping the Winner button records the highest completed milestone for that local day in `dailyPracticeWinnerClaimedMilestone`. On the next same-day session, Winner stays hidden until the child completes another full goal chunk: after claiming `25`, the next Winner appears at `+25` (`50` total); after claiming an adaptive review/test goal, the next Winner appears after one more full goal chunk.
 
@@ -180,11 +182,12 @@ The `GameView` card header and bottom progress strip show the contract visually 
 - Line: a linear `GradientProgressBar`; before the first Winner it fills toward the first goal, and after a Winner claim it refills toward the next full extra chunk.
 - The progress strip stays visible during adaptive daily play so the child and parent can predict exactly when Winner appears or reappears.
 
-Only completed adaptive-daily **target** rounds advance `Profile.dailyPracticeAttempts`. This is explicit at the persistence boundary via `countsTowardDailyPractice`:
+Only **correct** adaptive-daily **target** rounds advance `Profile.dailyPracticeAttempts` on ordinary days. This is explicit at the persistence boundary via `countsTowardDailyPractice` combined with the round's `wasCorrect` (and the weekly-test exception below):
 
-- Counts: ordinary target rounds, rescue/assisted target rounds, revealed target rounds, and impulsive target attempts when they came from the adaptive daily game flow.
-- Does not count: distractor exposure, cameo exposure, visual-only distractors, parent-directed extra practice, opening a preview, or any non-adaptive flow that does not pass the daily counter flag.
-- Mastery remains stricter than daily participation. Assisted and impulsive rounds may advance the visible daily bar while still being discounted from `recentResults` / `targetAttempts` where appropriate.
+- Counts: correct ordinary target rounds, correct rescue/assisted target rounds, and correct revealed target rounds, when they came from the adaptive daily game flow.
+- Weekly-test exception: on review/test days (detected by a present `activeWeeklyAssessment`, committed before the first answer), **every** answered target round counts — wrong answers included — because the test is a fixed-length audit, not a correct-answer quota.
+- Does not count: on ordinary days, any wrong answer (including deliberate wrong taps and impulsive misses); and always: distractor exposure, cameo exposure, visual-only distractors, parent-directed extra practice, opening a preview, or any non-adaptive flow that does not pass the daily counter flag.
+- Mastery remains stricter than daily participation. Assisted rounds may advance the visible daily bar while still being discounted from `recentResults` / `targetAttempts` where appropriate.
 
 This deliberately separates three ideas that used to be too easy to conflate: **daily participation** (visible 25/adaptive bar), **session pacing** (5 hearts), and **mastery evidence** (`LetterStat` / `UnitProgressStat`).
 
@@ -802,7 +805,7 @@ The contract is documented inline on `ProfileManager.previewSessionPlan` and `Ad
 | Focus graduation | **Can happen, any session** |
 | Reading unlock | **Can be recorded mid-session**, but onboarding/calibration starts no earlier than the next eligible calendar day |
 | Daily spotlight / new focus unit | **At most one formal introduction per calendar day** (graduation also consumes the day's quota); spotlight introduction does not wipe an unrelated durable focus |
-| Daily goal count | **Persists across same-day sessions** through `dailyPracticeDay` / `dailyPracticeAttempts`; only adaptive-daily target rounds advance it |
+| Daily goal count | **Persists across same-day sessions** through `dailyPracticeDay` / `dailyPracticeAttempts`; only correct adaptive-daily target rounds advance it |
 | Weekly assessment | **Persists across same-day review/test sessions** through `activeWeeklyAssessment`; a naturally completed assessment remains active until the next local day, while a parent-skipped assessment is archived immediately and clears the way for a same-day introduction session |
 | Day streak | **Unchanged** on same-day re-entry |
 | `focusActiveDays` | **Unchanged** — `Set<LocalDay>` insertion is idempotent |
@@ -989,7 +992,7 @@ Pismenka/
 │   ├── Summary/
 │   │   └── SummaryView.swift      Defines `SessionEndView` (file kept named for project stability)
 │   ├── Settings/
-│   │   └── SettingsView.swift     Music + voice/SFX toggles, Personalized letters (Čermák), Reduce motion, Confetti, Parent gate, Case practice, Daily reminder, Audio check, Export/Import backup, Google recovery, Copy diagnostic summary. Also defines `AudioCheckView`, which exposes only the first four language letters as `Replay "Find X"` plus the replayable game SFX clips (`Correct`, `Wrong`, `Streak 5`, `Streak 10`, `Click`).
+│   │   └── SettingsView.swift     Music + voice/SFX toggles, Personalized letters (Čermák), Reduce motion, Confetti, Parent gate, Case practice, Daily reminder, Audio check, Export/Import backup, cloud recovery, Copy diagnostic summary. Also defines `AudioCheckView`, which exposes only the first four language letters as `Replay "Find X"` plus the replayable game SFX clips (`Correct`, `Wrong`, `Streak 5`, `Streak 10`, `Click`).
 │   ├── Parent/
 │   │   └── ParentDashboardView.swift  Three-tier parent dashboard: Tier 1 (header/recommendation/needs-attention/focus/progress-glance), Tier 2 (weekly test summary, sortable+filterable letters list, reading progress — the reading-progress section is dormant), Tier 3 (collapsible diagnostics for retention/test rounds/confusions/raw history). Glossary alert + ellipsis menu for overrides, granular resets, weekly-test skip.
 │   └── Components/
@@ -1013,9 +1016,9 @@ Three file-naming quirks worth knowing about (kept this way to avoid churning th
 
 Progress is saved locally first and the app does not need network access for gameplay, learning, calibration, dashboards, audio, or checkpoints. `ProfileManager` persists to `UserDefaults` under the key **`pismenka_profiles_v2`**, with **`pismenka_profiles_v2_last_good`** and **`pismenka_profiles_v2_recovery`** used for last-readable backup and corrupt-payload preservation. Local saves are flushed on session-end and app lifecycle transitions such as `applicationWillResignActive`.
 
-Firebase is optional parent-controlled backup only. If enabled, local profiles are mirrored to Firebase for Google-account recovery; if disabled or offline, the learning experience is unchanged.
+Firebase is optional parent-controlled backup only. If enabled, local profiles are mirrored to Firebase for Apple or Google account recovery; if disabled or offline, the learning experience is unchanged.
 
-`FirebaseBackupService` signs the parent in with Google via Firebase Auth and writes a compact backup document to Firestore at **`users/{uid}/backups/current`**. The document stores metadata (`schemaVersion`, `savedAt`, `appVersion`, `payloadBytes`, `payloadEncoding`) plus a binary `payload` containing a JSON `CloudBackupEnvelope`, compressed with LZFSE when that is smaller. Payloads larger than about **900 KB** are rejected before upload. Profile and settings changes schedule a debounced auto-backup (**2 s** after the last local mutation) while signed in; **Sync now** cancels any pending debounced write, flushes local saves, forces an immediate upload, and waits for Firestore to acknowledge pending writes before reporting success. On sign-in, launch, and explicit **Restore**, the service automatically merges profiles by `Profile.id`, keeping the newer `modifiedAt` for matching profiles and adding new profiles up to the four-profile limit. The settings **Google recovery** row exposes **Sign in with Google**, **Sync now**, **Restore**, and **Sign out** when authenticated. App settings are restored from the newest settings snapshot. Session checkpoints stay local-only because they are short-lived resume state, not long-term learning progress.
+`FirebaseBackupService` signs the parent in with Apple or Google via Firebase Auth and writes a compact backup document to Firestore at **`users/{uid}/backups/current`**. The document stores metadata (`schemaVersion`, `savedAt`, `appVersion`, `payloadBytes`, `payloadEncoding`) plus a binary `payload` containing a JSON `CloudBackupEnvelope`, compressed with LZFSE when that is smaller. Payloads larger than about **900 KB** are rejected before upload. Profile and settings changes schedule a debounced auto-backup (**2 s** after the last local mutation) while signed in; **Sync now** cancels any pending debounced write, flushes local saves, forces an immediate upload, and waits for Firestore to acknowledge pending writes before reporting success. On sign-in, launch, and explicit **Restore**, the service automatically merges profiles by `Profile.id`, keeping the newer `modifiedAt` for matching profiles and adding new profiles up to the four-profile limit. The settings **Cloud recovery** row exposes **Sign in with Apple**, **Sign in with Google**, **Sync now**, **Restore**, and **Sign out** when authenticated. App settings are restored from the newest settings snapshot. Session checkpoints stay local-only because they are short-lived resume state, not long-term learning progress.
 
 Each `Profile` carries:
 
