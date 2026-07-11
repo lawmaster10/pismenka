@@ -30,7 +30,7 @@ class ProfileManager: ObservableObject {
 
     private let introductionDailyGoal = 25
     private let reviewTestDailyGoal = 50
-    private let minimumWeeklyAssessmentLetters = 2
+    private let completedLetterSessionsBeforeAssessment = 6
     private let recentWeeklyAssessmentLimit = 12
 
     private struct DailyPracticePlanning {
@@ -227,6 +227,7 @@ class ProfileManager: ObservableObject {
             )
         }
         profiles[index].weeklyIntroducedLetters = []
+        profiles[index].completedLetterSessionsInCycle = 0
         profiles[index].learningCycleStartDay = today
         profiles[index].dailyPracticeDay = today
         profiles[index].dailyPracticeAttempts = 0
@@ -272,6 +273,7 @@ class ProfileManager: ObservableObject {
         profiles[index].dailyPracticeWinnerClaimedMilestone = 0
         profiles[index].learningCycleStartDay = nil
         profiles[index].weeklyIntroducedLetters = []
+        profiles[index].completedLetterSessionsInCycle = 0
         profiles[index].activeWeeklyAssessment = nil
         profiles[index].recentWeeklyAssessments = []
         profiles[index].lastSessionDay = nil
@@ -443,8 +445,8 @@ class ProfileManager: ObservableObject {
         var introducedFocusTarget: FocusTarget?
         var dailySpotlightLetter: String?
         var pausedStuckFocusToday = false
-        var primaryLayer: LearningLayer = .letters
-        var activityKind: LearningActivityKind = .letterRecognition
+        let primaryLayer: LearningLayer = .letters
+        let activityKind: LearningActivityKind = .letterRecognition
 
         if !clockMovedBackward {
             profile.clearExpiredPausedFocusLetters(on: today)
@@ -502,6 +504,18 @@ class ProfileManager: ObservableObject {
             profile.lastSessionDay = today
         }
 
+        // Expert maintenance should match the amount of due work instead of
+        // forcing a 25-answer round-robin through already-stable letters.
+        if primaryLayer == .letters,
+           dailyPractice.kind == .introduction,
+           profile.currentFocusLetter == nil,
+           dailySpotlightLetter == nil,
+           profile.alphabetLevel == .expert {
+            let dueCount = profile.snapshot.dueReviewLetters.count
+            let auditCount = min(2, profile.snapshot.auditReviewLetters.count)
+            dailyPractice.goalTarget = min(15, max(5, dueCount * 2 + auditCount))
+        }
+
         if primaryLayer != .letters {
             dailyPractice = DailyPracticePlanning(
                 kind: .introduction,
@@ -529,11 +543,15 @@ class ProfileManager: ObservableObject {
         }
 
         let knownCount = profile.knownLetters.count
-        let warmup: Int
-        if knownCount >= 6 { warmup = 5 }
-        else if knownCount >= 4 { warmup = 3 }
-        else if knownCount >= 3 { warmup = 2 }
-        else { warmup = 0 }
+        let baseWarmup: Int
+        if knownCount >= 6 { baseWarmup = 5 }
+        else if knownCount >= 4 { baseWarmup = 3 }
+        else if knownCount >= 3 { baseWarmup = 2 }
+        else { baseWarmup = 0 }
+        let dueWarmupCount = profile.snapshot.dueReviewLetters
+            .filter { profile.knownLetters.contains($0) }
+            .count
+        let warmup = baseWarmup == 0 ? 0 : min(baseWarmup, max(1, dueWarmupCount))
 
         let sessionFocusLetter = dailyPractice.kind == .reviewTest ? nil : profile.currentFocusLetter
         let focusTarget = dailyPractice.kind == .reviewTest ? nil : profile.currentFocusTarget
@@ -583,6 +601,7 @@ class ProfileManager: ObservableObject {
                assessment.completedOn != today {
                 profile.activeWeeklyAssessment = nil
                 profile.weeklyIntroducedLetters = []
+                profile.completedLetterSessionsInCycle = 0
                 profile.learningCycleStartDay = today
             }
 
@@ -601,12 +620,10 @@ class ProfileManager: ObservableObject {
 
             normalizeWeeklyCycleIfNeeded(profile: &profile, today: today)
 
-            let cycleStart = profile.learningCycleStartDay ?? today
-            let scheduledReviewDay = cycleStart.nextSunday()
-            let weeklyLetters = profile.weeklyIntroducedLetters
-            let reviewDue = today >= scheduledReviewDay && weeklyLetters.count >= minimumWeeklyAssessmentLetters
+            let reviewDue = profile.completedLetterSessionsInCycle
+                >= completedLetterSessionsBeforeAssessment
             let assessmentPreview = reviewDue
-                ? profile.buildAdaptiveWeeklyAssessment(scheduledFor: scheduledReviewDay, startedOn: today, legacyDailyGoal: reviewTestDailyGoal)
+                ? profile.buildAdaptiveWeeklyAssessment(scheduledFor: today, startedOn: today, legacyDailyGoal: reviewTestDailyGoal)
                 : nil
             let reviewLetters = assessmentPreview?.cohortLetters ?? []
             let kind: DailyPracticeKind = reviewDue && !reviewLetters.isEmpty ? .reviewTest : .introduction
@@ -617,7 +634,7 @@ class ProfileManager: ObservableObject {
                 startCount: startCount,
                 claimedWinnerCount: claimedWinnerCount,
                 weeklyReviewLetters: kind == .reviewTest ? reviewLetters : [],
-                scheduledReviewDay: kind == .reviewTest ? scheduledReviewDay : nil
+                scheduledReviewDay: kind == .reviewTest ? today : nil
             )
         }
 
@@ -636,12 +653,10 @@ class ProfileManager: ObservableObject {
             )
         }
 
-        let cycleStart = profile.learningCycleStartDay ?? today
-        let scheduledReviewDay = cycleStart.nextSunday()
-        let weeklyLetters = profile.weeklyIntroducedLetters
-        let reviewDue = today >= scheduledReviewDay && weeklyLetters.count >= minimumWeeklyAssessmentLetters
+        let reviewDue = profile.completedLetterSessionsInCycle
+            >= completedLetterSessionsBeforeAssessment
         let assessmentPreview = reviewDue
-            ? profile.buildAdaptiveWeeklyAssessment(scheduledFor: scheduledReviewDay, startedOn: today, legacyDailyGoal: reviewTestDailyGoal)
+            ? profile.buildAdaptiveWeeklyAssessment(scheduledFor: today, startedOn: today, legacyDailyGoal: reviewTestDailyGoal)
             : nil
         let reviewLetters = assessmentPreview?.cohortLetters ?? []
         let kind: DailyPracticeKind = reviewDue && !reviewLetters.isEmpty ? .reviewTest : .introduction
@@ -651,7 +666,7 @@ class ProfileManager: ObservableObject {
             startCount: startCount,
             claimedWinnerCount: claimedWinnerCount,
             weeklyReviewLetters: kind == .reviewTest ? reviewLetters : [],
-            scheduledReviewDay: kind == .reviewTest ? scheduledReviewDay : nil
+            scheduledReviewDay: kind == .reviewTest ? today : nil
         )
     }
 
@@ -675,12 +690,13 @@ class ProfileManager: ObservableObject {
     private func normalizeWeeklyCycleIfNeeded(profile: inout Profile, today: LocalDay) {
         guard let cycleStart = profile.learningCycleStartDay else {
             profile.learningCycleStartDay = today
-            profile.weeklyIntroducedLetters = []
             return
         }
         if today.daysSince(cycleStart) < 0 {
+            // The trigger is session-count based, so a clock correction only
+            // repairs the informational start date; earned sessions/cohort
+            // remain intact.
             profile.learningCycleStartDay = today
-            profile.weeklyIntroducedLetters = []
         }
     }
 
@@ -782,7 +798,23 @@ class ProfileManager: ObservableObject {
     func claimDailyPracticeWinner(profileId: UUID, milestone: Int) {
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
         var profile = profiles[index]
+        let previousClaimedMilestone = profile.dailyPracticeWinnerClaimedCount()
+        let wasAssessmentActive = profile.activeWeeklyAssessment != nil
         profile.claimDailyPracticeWinner(milestone: milestone)
+        if !wasAssessmentActive {
+            let previouslyCompleted = previousClaimedMilestone / introductionDailyGoal
+            let nowCompleted = milestone / introductionDailyGoal
+            let newlyCompleted = max(0, nowCompleted - previouslyCompleted)
+            if newlyCompleted > 0 {
+                if profile.learningCycleStartDay == nil {
+                    profile.learningCycleStartDay = LocalDay.today()
+                }
+                profile.completedLetterSessionsInCycle = min(
+                    completedLetterSessionsBeforeAssessment,
+                    profile.completedLetterSessionsInCycle + newlyCompleted
+                )
+            }
+        }
         // Reaching the visible daily goal on a weekly-test day finalizes the
         // test. The progress bar counts every round (warmup, rescue, filler
         // review), so a child can reach the goal (e.g. 40/40) without the
@@ -876,7 +908,6 @@ class ProfileManager: ObservableObject {
         }
 
         var stat = profile.letterStats[letter] ?? LetterStat()
-        let wasFocusGraduatedBefore = stat.isFocusGraduated
         // Snapshot the data-driven `isKnown` before we mutate. Slip
         // detection (#16) compares this to the post-mutation value — a
         // true→false flip is what marks the letter as "recently slipped"
@@ -940,6 +971,17 @@ class ProfileManager: ObservableObject {
                     stat.recordConfusion(with: wrongKey)
                 }
             }
+            if !context.isAssistedForMastery, shouldCountForLearning {
+                for option in Set(optionsShown) where option != letter {
+                    guard LetterDifficulty.isEligibleTarget(option, language: profile.language) else {
+                        continue
+                    }
+                    let wasPairMistake = !wasCorrect
+                        && mistakeType == .confusion
+                        && selectedWrongLetter == option
+                    stat.recordConfusionOpportunity(with: option, wasMistake: wasPairMistake)
+                }
+            }
             // Phase 0c (#8 fix): a target round is, by definition, the
             // app intentionally teaching this letter. Mark it
             // introduced. This is the second of the two writers (the
@@ -961,6 +1003,14 @@ class ProfileManager: ObservableObject {
             stat.demotedAt = Date()
         }
         profile.letterStats[letter] = stat
+        if asTarget,
+           !context.isAssistedForMastery,
+           shouldCountForLearning,
+           [4, 6, 8].contains(optionsShown.count) {
+            var gridStat = profile.gridPerformanceStats[optionsShown.count] ?? GridPerformanceStat()
+            gridStat.record(correct: wasCorrect)
+            profile.gridPerformanceStats[optionsShown.count] = gridStat
+        }
         if asTarget && countsTowardDailyPractice {
             // Only correct answers advance the ordinary daily goal, so a wrong
             // tap (including a deliberate one) earns no credit toward the Winner
@@ -991,34 +1041,26 @@ class ProfileManager: ObservableObject {
         var graduatedThisCall: String?
         var leveledUpTo: AlphabetLevel?
 
-        // Focus graduation: only matters when the focus letter has just
-        // crossed the stricter "isFocusGraduated" rule (and only on a
-        // target attempt — distractor exposure can't graduate a
-        // letter). A discounted impulse tap also can't graduate, since
-        // `recordDistractorExposure` doesn't move `recentResults`; the
-        // `stat.isFocusGraduated` check below is what enforces that.
+        // Formal mastery belongs to the introduced letter, not to the
+        // current-focus pointer. Daily spotlight letters are legitimate
+        // teaching targets and may reach 7/8 while an older focus remains.
+        // Any introduced letter that proves the strict criterion therefore
+        // enters lifetime mastery; only the matching current focus is cleared.
         if asTarget,
-           let focus = profile.currentFocusLetter,
-           focus == letter,
-           !wasFocusGraduatedBefore,
+           shouldCountForLearning,
+           profile.introducedLetters.contains(letter),
+           !profile.everMasteredLetters.contains(letter),
            stat.isFocusGraduated {
-            graduatedThisCall = focus
-            // Lifetime mastery bookkeeping.
-            profile.everMasteredLetters.insert(focus)
-            // Clear focus so a new one is introduced tomorrow.
-            profile.currentFocusLetter = nil
-            profile.focusStartedDay = nil
-            profile.focusPracticedDays = []
-            // Today's "one new letter per day" quota is consumed by the
-            // graduation. Without this, a child who graduates focus B mid
-            // session-1 would be served a brand-new focus C on a same-day
-            // session-2 "Play again", silently violating the rule. The
-            // value of `lastNewLetterDay` was previously `B`'s introduction
-            // day (potentially days ago); we deliberately overwrite it to
-            // today so the same-day quota check (`alreadyIntroducedToday =
-            // lastNewLetterDay == today`) fires correctly. The next
-            // calendar day will then introduce the next focus letter.
-            profile.lastNewLetterDay = LocalDay.today()
+            graduatedThisCall = letter
+            profile.everMasteredLetters.insert(letter)
+            if profile.currentFocusLetter == letter {
+                profile.currentFocusLetter = nil
+                profile.focusStartedDay = nil
+                profile.focusPracticedDays = []
+                // A focus graduation consumes today's introduction quota so a
+                // same-day replay cannot immediately assign another focus.
+                profile.lastNewLetterDay = LocalDay.today()
+            }
 
             // Level-up detection: a celebration fires for a given `AlphabetLevel`
             // at most once per profile, ever. The receipt is the
@@ -1124,12 +1166,24 @@ class ProfileManager: ObservableObject {
             return
         }
         assessment.complete(on: today)
+        let now = Date()
+        for letter in assessment.needsReviewLetters {
+            guard var stat = profile.letterStats[letter] else { continue }
+            stat.scheduleFollowUp(afterDays: 1, from: now)
+            profile.letterStats[letter] = stat
+        }
+        for letter in assessment.watchLetters {
+            guard var stat = profile.letterStats[letter] else { continue }
+            stat.scheduleFollowUp(afterDays: 3, from: now)
+            profile.letterStats[letter] = stat
+        }
         profile.activeWeeklyAssessment = assessment
         profile.recentWeeklyAssessments.append(assessment)
         if profile.recentWeeklyAssessments.count > recentWeeklyAssessmentLimit {
             profile.recentWeeklyAssessments.removeFirst(profile.recentWeeklyAssessments.count - recentWeeklyAssessmentLimit)
         }
         profile.weeklyIntroducedLetters = []
+        profile.completedLetterSessionsInCycle = 0
         profile.learningCycleStartDay = today
     }
 
@@ -1522,9 +1576,10 @@ class ProfileManager: ObservableObject {
                     && profile.letterStats[weekly]?.isStrongKnown != true
             }
         })
+        // Introduced letters must remain eligible for remediation. Blocking
+        // them made `nextFocusWithReason`'s stale-weakness branch unreachable
+        // and could strand a failed spotlight forever.
         let blocked = profile.activePausedFocusLetters()
-            .union(profile.introducedLetters)
-            .union(profile.weeklyIntroducedLetters)
             .union(weeklyConfusables)
         return LetterDifficulty.nextFocusWithReason(
             language: profile.language,

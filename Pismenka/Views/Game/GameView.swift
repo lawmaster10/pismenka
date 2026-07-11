@@ -213,7 +213,7 @@ struct GameView: View {
             return "Practicing \(letter)"
         }
         if plan.dailyPracticeKind == .reviewTest {
-            return "Weekly test"
+            return "Progress check"
         }
         return "Daily letters"
     }

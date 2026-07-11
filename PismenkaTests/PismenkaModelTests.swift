@@ -211,9 +211,7 @@ final class PismenkaModelTests: XCTestCase {
             let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
 
             let expectedWarmup: Int
-            if knownCount >= 6 { expectedWarmup = 5 }
-            else if knownCount >= 4 { expectedWarmup = 3 }
-            else if knownCount >= 3 { expectedWarmup = 2 }
+            if knownCount >= 3 { expectedWarmup = 1 }
             else { expectedWarmup = 0 }
 
             XCTAssertEqual(plan.warmupLength, expectedWarmup, "knownCount=\(knownCount)")
@@ -407,21 +405,50 @@ final class PismenkaModelTests: XCTestCase {
 
         XCTAssertEqual(manager.profiles[0].dailyPracticeWinnerClaimedDay, today)
         XCTAssertEqual(manager.profiles[0].dailyPracticeWinnerClaimedMilestone, 25)
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 1)
         XCTAssertEqual(manager.previewSessionPlan(profileId: profile.id).dailyGoalClaimedCount, 25)
+
+        manager.claimDailyPracticeWinner(profileId: profile.id, milestone: 50)
+        manager.claimDailyPracticeWinner(profileId: profile.id, milestone: 50)
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 2)
+    }
+
+    @MainActor
+    func testSixthCompletedLetterSessionMakesNextSessionAProgressCheck() {
+        let today = LocalDay.today()
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: ["A", "B"]),
+            hasCompletedCalibration: true,
+            dailyPracticeDay: today,
+            dailyPracticeAttempts: 25,
+            weeklyIntroducedLetters: ["A", "B"],
+            completedLetterSessionsInCycle: 5,
+            introducedLetters: ["A", "B"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        manager.claimDailyPracticeWinner(profileId: profile.id, milestone: 25)
+        let nextPlan = manager.previewSessionPlan(profileId: profile.id)
+
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 6)
+        XCTAssertEqual(nextPlan.dailyPracticeKind, .reviewTest)
+        XCTAssertEqual(nextPlan.dailyGoalTarget, 8)
     }
 
     @MainActor
     func testReviewTestDayUsesAdaptiveAuditGoal() {
-        let today = LocalDay.today()
-        let cycleStart = cycleStartForDueWeeklyReview(on: today)
         let profile = Profile(
             name: "Mila",
             avatarId: .lion,
             language: .english,
             letterStats: knownStats(for: ["A", "B", "C", "D", "E"]),
             hasCompletedCalibration: true,
-            learningCycleStartDay: cycleStart,
             weeklyIntroducedLetters: ["A", "B", "C"],
+            completedLetterSessionsInCycle: 6,
             introducedLetters: ["A", "B", "C", "D", "E"]
         )
         let manager = ProfileManager()
@@ -450,15 +477,18 @@ final class PismenkaModelTests: XCTestCase {
     }
 
     @MainActor
-    func testWeeklyCycleSchedulesSundayOrNextPlayedReviewDay() {
+    func testProgressCheckStartsAfterSixCompletedLetterSessionsRegardlessOfDate() {
         let today = LocalDay.today()
         let notDueProfile = Profile(
             name: "Mila",
             avatarId: .lion,
             language: .english,
+            letterStats: knownStats(for: ["A", "B"]),
             hasCompletedCalibration: true,
-            learningCycleStartDay: today,
-            weeklyIntroducedLetters: ["A", "B"]
+            learningCycleStartDay: today.adding(days: -30),
+            weeklyIntroducedLetters: ["A", "B"],
+            completedLetterSessionsInCycle: 5,
+            introducedLetters: ["A", "B"]
         )
         let notDueManager = ProfileManager()
         notDueManager.profiles = [notDueProfile]
@@ -472,9 +502,12 @@ final class PismenkaModelTests: XCTestCase {
             name: "Mila",
             avatarId: .lion,
             language: .english,
+            letterStats: knownStats(for: ["A", "B"]),
             hasCompletedCalibration: true,
-            learningCycleStartDay: cycleStartForDueWeeklyReview(on: today),
-            weeklyIntroducedLetters: ["A", "B"]
+            learningCycleStartDay: today,
+            weeklyIntroducedLetters: ["A", "B"],
+            completedLetterSessionsInCycle: 6,
+            introducedLetters: ["A", "B"]
         )
         let dueManager = ProfileManager()
         dueManager.profiles = [dueProfile]
@@ -491,7 +524,8 @@ final class PismenkaModelTests: XCTestCase {
             avatarId: .lion,
             language: .english,
             hasCompletedCalibration: true,
-            learningCycleStartDay: cycleStartForDueWeeklyReview(on: today)
+            learningCycleStartDay: today,
+            completedLetterSessionsInCycle: 6
         )
         let manager = ProfileManager()
         manager.profiles = [emptyReviewProfile]
@@ -504,7 +538,6 @@ final class PismenkaModelTests: XCTestCase {
 
     @MainActor
     func testReviewTestDayDoesNotIntroduceNewLetter() {
-        let today = LocalDay.today()
         let profile = Profile(
             name: "Mila",
             avatarId: .lion,
@@ -512,8 +545,8 @@ final class PismenkaModelTests: XCTestCase {
             letterStats: knownStats(for: ["A", "B", "C", "D"]),
             hasCompletedCalibration: true,
             currentFocusLetter: "D",
-            learningCycleStartDay: cycleStartForDueWeeklyReview(on: today),
             weeklyIntroducedLetters: ["A", "B", "C"],
+            completedLetterSessionsInCycle: 6,
             introducedLetters: ["A", "B", "C", "D"]
         )
         let manager = ProfileManager()
@@ -537,8 +570,8 @@ final class PismenkaModelTests: XCTestCase {
             language: .english,
             letterStats: knownStats(for: ["A", "B", "C", "D"]),
             hasCompletedCalibration: true,
-            learningCycleStartDay: cycleStartForDueWeeklyReview(on: today),
             weeklyIntroducedLetters: ["A", "B", "C"],
+            completedLetterSessionsInCycle: 6,
             introducedLetters: ["A", "B", "C", "D"]
         )
         let manager = ProfileManager()
@@ -570,6 +603,7 @@ final class PismenkaModelTests: XCTestCase {
             hasCompletedCalibration: true,
             dailyPracticeDay: today,
             dailyPracticeAttempts: 40,
+            completedLetterSessionsInCycle: 6,
             activeWeeklyAssessment: assessment,
             introducedLetters: ["A", "B"]
         )
@@ -628,6 +662,7 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(completed.results["B"]?.independentCorrect, 2)
         XCTAssertEqual(completed.retainedLetters, ["A"])
         XCTAssertEqual(completed.needsReviewLetters, ["B"])
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 0)
         XCTAssertEqual(manager.profiles[0].recentWeeklyAssessments.last, completed)
     }
 
@@ -795,7 +830,7 @@ final class PismenkaModelTests: XCTestCase {
             language: .english,
             letterStats: [
                 // "B" looks fluent on the spotlight day (8/8 quick), but the
-                // Sunday test still needs to verify across-days retention.
+                // progress check still needs to verify cross-session retention.
                 "B": knownStat(),
                 "Z": knownStat()
             ],
@@ -1056,6 +1091,7 @@ final class PismenkaModelTests: XCTestCase {
             hasCompletedCalibration: true,
             dailyPracticeDay: today,
             dailyPracticeAttempts: 20,
+            completedLetterSessionsInCycle: 6,
             activeWeeklyAssessment: assessment,
             introducedLetters: ["A", "B", "C"]
         )
@@ -1066,6 +1102,7 @@ final class PismenkaModelTests: XCTestCase {
 
         let archived = try! XCTUnwrap(manager.profiles[0].recentWeeklyAssessments.last)
         XCTAssertNil(manager.profiles[0].activeWeeklyAssessment)
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 0)
         XCTAssertEqual(archived.id, assessment.id)
         XCTAssertEqual(archived.completedOn, today)
         XCTAssertEqual(archived.results["A"]?.independentAttempts, 4)
@@ -1594,17 +1631,15 @@ final class PismenkaModelTests: XCTestCase {
     }
 
     @MainActor
-    func testEmptyReviewDayFallsBackToIntroductionWithoutResettingCycle() {
+    func testProgressCheckWithoutAnyEligibleLettersFallsBackWithoutResettingCount() {
         let today = LocalDay.today()
-        let cycleStart = cycleStartForDueWeeklyReview(on: today)
         let profile = Profile(
             name: "Mila",
             avatarId: .lion,
             language: .english,
             hasCompletedCalibration: true,
-            learningCycleStartDay: cycleStart,
-            weeklyIntroducedLetters: ["A"],
-            introducedLetters: ["A"]
+            learningCycleStartDay: today.adding(days: -30),
+            completedLetterSessionsInCycle: 6
         )
         let manager = ProfileManager()
         manager.profiles = [profile]
@@ -1613,7 +1648,7 @@ final class PismenkaModelTests: XCTestCase {
 
         XCTAssertEqual(plan.dailyPracticeKind, .introduction)
         XCTAssertEqual(plan.dailyGoalTarget, 25)
-        XCTAssertEqual(manager.profiles[0].learningCycleStartDay, cycleStart)
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 6)
         XCTAssertTrue(plan.weeklyReviewLetters.isEmpty)
     }
 
@@ -1787,13 +1822,21 @@ final class PismenkaModelTests: XCTestCase {
 
         for testCase in cases {
             let known = Set(testCase.language.letters.prefix(testCase.knownCount))
+            var gridPerformance: [Int: GridPerformanceStat] = [:]
+            if testCase.expectedOptions >= 6 {
+                gridPerformance[4] = gridStat(correct: 12)
+            }
+            if testCase.expectedOptions >= 8 {
+                gridPerformance[6] = gridStat(correct: 16)
+            }
             let profile = Profile(
                 name: "Mila",
                 avatarId: .lion,
                 language: testCase.language,
                 letterStats: knownStats(for: known),
                 hasCompletedCalibration: true,
-                everMasteredLetters: known
+                everMasteredLetters: known,
+                gridPerformanceStats: gridPerformance
             )
             let manager = ProfileManager()
             manager.profiles = [profile]
@@ -1805,7 +1848,7 @@ final class PismenkaModelTests: XCTestCase {
     }
 
     @MainActor
-    func testParentMarkedKnownLettersCountTowardOptionThreshold() {
+    func testParentMarkedKnownLettersCountTowardOptionPoolSafety() {
         let language = GameLanguage.english
         let known = Set(language.letters.prefix(14))
         let markedKnown = language.letters[14]
@@ -1819,7 +1862,8 @@ final class PismenkaModelTests: XCTestCase {
             language: language,
             letterStats: stats,
             hasCompletedCalibration: true,
-            everMasteredLetters: known
+            everMasteredLetters: known,
+            gridPerformanceStats: [4: gridStat(correct: 12)]
         )
         let manager = ProfileManager()
         manager.profiles = [profile]
@@ -1835,7 +1879,8 @@ final class PismenkaModelTests: XCTestCase {
         let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
 
         XCTAssertEqual(profile.knownAlphabetLetterCount, 15)
-        XCTAssertEqual(state.displayedLetters.count, 6)
+        XCTAssertEqual(profile.letterOptionsPerRound, 6)
+        XCTAssertEqual(state.displayedLetters.count, 4)
     }
 
     @MainActor
@@ -1881,7 +1926,8 @@ final class PismenkaModelTests: XCTestCase {
             language: language,
             letterStats: knownStats(for: known),
             hasCompletedCalibration: true,
-            everMasteredLetters: known
+            everMasteredLetters: known,
+            gridPerformanceStats: [4: gridStat(correct: 12)]
         )
         let manager = ProfileManager()
         manager.profiles = [profile]
@@ -1924,7 +1970,11 @@ final class PismenkaModelTests: XCTestCase {
             language: language,
             letterStats: knownStats(for: known),
             hasCompletedCalibration: true,
-            everMasteredLetters: known
+            everMasteredLetters: known,
+            gridPerformanceStats: [
+                4: gridStat(correct: 12),
+                6: gridStat(correct: 16)
+            ]
         )
         let manager = ProfileManager()
         manager.profiles = [profile]
@@ -1968,7 +2018,8 @@ final class PismenkaModelTests: XCTestCase {
             language: .english,
             letterStats: knownStats(for: known),
             hasCompletedCalibration: true,
-            everMasteredLetters: known
+            everMasteredLetters: known,
+            gridPerformanceStats: [4: gridStat(correct: 12)]
         )
         let manager = ProfileManager()
         manager.profiles = [profile]
@@ -1980,26 +2031,39 @@ final class PismenkaModelTests: XCTestCase {
             focusLetter: nil,
             focusScaffoldingLevel: 0
         )
-        let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
+        var snapshot = gameSnapshot(
+            profile: profile,
+            plan: plan,
+            advanceToNextRoundOnRestore: true
+        )
+        snapshot.recentRoundCorrectness = [false, false]
+        snapshot.heartsRemaining = 3
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager,
+            restoredSnapshot: snapshot
+        )
 
         let baseOptionCount = state.displayedLetters.count
         XCTAssertGreaterThan(baseOptionCount, 4)
         XCTAssertEqual(state.liveDifficulty, .normal)
 
-        // Three genuine misses drop hearts to 2, tripping the governor easier.
-        for _ in 0..<3 {
-            let wrong = try XCTUnwrap(state.displayedLetters.first { $0 != state.targetLetter })
-            _ = state.processAnswer(wrong)
-            state.setupNewRound()
-        }
+        // A third genuine miss in the rolling window trips the governor.
+        let wrong = try XCTUnwrap(state.displayedLetters.first { $0 != state.targetLetter })
+        _ = state.processAnswer(wrong)
+        state.setupNewRound()
         XCTAssertEqual(state.liveDifficulty, .easierUntilStreak)
         XCTAssertEqual(state.heartsRemaining, 2)
         XCTAssertLessThan(state.displayedLetters.count, baseOptionCount)
 
-        // Two correct answers walk the governor back to the full grid.
-        for _ in 0..<2 {
+        // Rescue answers do not count, so continue until five independent
+        // outcomes contain at least four successes.
+        var recoveryRounds = 0
+        while state.liveDifficulty != .normal && recoveryRounds < 10 {
             _ = state.processAnswer(state.targetLetter)
             state.setupNewRound()
+            recoveryRounds += 1
         }
         XCTAssertEqual(state.liveDifficulty, .normal)
         XCTAssertEqual(state.displayedLetters.count, baseOptionCount)
@@ -3153,6 +3217,7 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(profile.dailyPracticeAttempts, 0)
         XCTAssertNil(profile.learningCycleStartDay)
         XCTAssertTrue(profile.weeklyIntroducedLetters.isEmpty)
+        XCTAssertEqual(profile.completedLetterSessionsInCycle, 0)
     }
 
     func testAlphabetLevelAndReadingStageThresholdsAreSeparate() {
@@ -3443,12 +3508,12 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertTrue(summary.needsPracticeLetters.isEmpty)
     }
 
-    func testReviewPriorityIgnoresSlowResponsesAndUsesWeaknessAndStaleness() {
+    func testReviewPriorityIgnoresSlowResponsesAndUsesRecallRisk() {
         // Two letters with identical (perfect) recent accuracy and no
         // staleness — one answered fast, one answered slow. Under the
         // old rule the slow letter floated up the warm-up queue purely
-        // because of its median; under the new rule both should tie at
-        // 0 priority and the slow letter doesn't crowd out actually-weak
+        // because of its median; under the scheduler both should tie and
+        // the slow letter doesn't crowd out actually-weak
         // letters.
         var fast = LetterStat()
         var slow = LetterStat()
@@ -3457,8 +3522,7 @@ final class PismenkaModelTests: XCTestCase {
             slow.recordTargetAttempt(correct: true, responseTime: 3.0)
         }
 
-        XCTAssertEqual(fast.reviewPriority, 0.0, accuracy: 0.0001)
-        XCTAssertEqual(slow.reviewPriority, 0.0, accuracy: 0.0001)
+        XCTAssertEqual(fast.reviewPriority, slow.reviewPriority, accuracy: 0.0001)
 
         // A genuinely weak letter must still outrank both of them, even
         // when it's been answered very recently.
@@ -3646,6 +3710,23 @@ final class PismenkaModelTests: XCTestCase {
             lowercaseMode: .uppercaseOnly,
             modifiedAt: Date(timeIntervalSince1970: 200)
         )))
+    }
+
+    @MainActor
+    func testFirstLaunchOnboardingDefaultsToCzechAndPersistsChoice() throws {
+        let suiteName = "PismenkaModelTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let freshSettings = AppSettings(defaults: defaults)
+        XCTAssertFalse(freshSettings.hasCompletedFirstLaunchOnboarding)
+        XCTAssertEqual(freshSettings.defaultGameLanguage, .czech)
+
+        freshSettings.completeFirstLaunchOnboarding(language: .english)
+
+        let reloadedSettings = AppSettings(defaults: defaults)
+        XCTAssertTrue(reloadedSettings.hasCompletedFirstLaunchOnboarding)
+        XCTAssertEqual(reloadedSettings.defaultGameLanguage, .english)
     }
 
     @MainActor
@@ -3866,7 +3947,356 @@ final class PismenkaModelTests: XCTestCase {
         _ = state.processAnswer(state.targetLetter)
 
         let event = try XCTUnwrap(manager.profiles[0].recentRoundEvents.last)
-        XCTAssertEqual(event.cameoLetter, "Z")
+        let expectedSafeNameLetter = profile.nameLetterKeys.first {
+            !known.contains($0)
+                && !LetterDifficulty.areVisuallyConfusing(event.target, $0)
+        }
+        XCTAssertEqual(event.cameoLetter, expectedSafeNameLetter)
+    }
+
+    @MainActor
+    func testWeakIntroducedLetterCanBecomeFocusAgain() {
+        var weak = LetterStat()
+        weak.recordTargetAttempt(correct: false)
+        weak.recordTargetAttempt(correct: false)
+        let known = Set(["B", "C", "E", "F", "H"])
+        let yesterday = LocalDay.today().adding(days: -1)
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: known).merging(["A": weak]) { _, new in new },
+            hasCompletedCalibration: true,
+            lastNewLetterDay: yesterday,
+            learningCycleStartDay: yesterday,
+            introducedLetters: known.union(["A"])
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id)
+
+        XCTAssertEqual(plan.dailySpotlightLetter, "A")
+        XCTAssertEqual(manager.profiles[0].currentFocusLetter, "A")
+        XCTAssertEqual(manager.profiles[0].lastFocusSelection?.reason, .staleWeakness)
+    }
+
+    @MainActor
+    func testSpotlightGraduatesWithoutClearingDifferentFocus() {
+        var almostMastered = LetterStat()
+        for _ in 0..<6 { almostMastered.recordTargetAttempt(correct: true) }
+        almostMastered.recordTargetAttempt(correct: false)
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: ["B": almostMastered],
+            hasCompletedCalibration: true,
+            currentFocusLetter: "A",
+            introducedLetters: ["A", "B"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let result = manager.recordAnswer(
+            profileId: profile.id,
+            letter: "B",
+            wasCorrect: true,
+            asTarget: true,
+            optionsShown: ["A", "B", "C", "E"],
+            attemptContext: .independent
+        )
+
+        XCTAssertEqual(result.focusGraduated, "B")
+        XCTAssertTrue(manager.profiles[0].everMasteredLetters.contains("B"))
+        XCTAssertEqual(manager.profiles[0].currentFocusLetter, "A")
+    }
+
+    func testProfileMigrationRepairsStrandedSpotlightMastery() throws {
+        let original = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: ["B": knownStat()],
+            hasCompletedCalibration: true,
+            currentFocusLetter: "A",
+            everMasteredLetters: [],
+            introducedLetters: ["A", "B"]
+        )
+
+        let decoded = try JSONDecoder().decode(Profile.self, from: JSONEncoder().encode(original))
+
+        XCTAssertTrue(decoded.everMasteredLetters.contains("B"))
+        XCTAssertEqual(decoded.currentFocusLetter, "A")
+    }
+
+    func testMemorySchedulerExpandsIntervalsAndLapseSchedulesTomorrow() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var state = LetterMemoryState()
+        state = AdaptiveLearningScheduler.recording(state, correct: true, at: start)
+        let firstStability = state.stabilityDays
+
+        for _ in 0..<7 {
+            let due = state.nextReviewAt!
+            state = AdaptiveLearningScheduler.recording(state, correct: true, at: due)
+        }
+
+        XCTAssertGreaterThan(state.stabilityDays, 14)
+        XCTAssertGreaterThan(state.stabilityDays, firstStability)
+        let lapseDate = state.nextReviewAt!
+        state = AdaptiveLearningScheduler.recording(state, correct: false, at: lapseDate)
+        XCTAssertEqual(
+            state.followUpAt!.timeIntervalSince(lapseDate),
+            86_400,
+            accuracy: 1
+        )
+        XCTAssertLessThanOrEqual(state.stabilityDays, 2)
+    }
+
+    @MainActor
+    func testAssistedAndImpulseAttemptsDoNotMoveMemoryOrGridAbility() {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            hasCompletedCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        manager.recordAnswer(
+            profileId: profile.id,
+            letter: "A",
+            wasCorrect: true,
+            asTarget: true,
+            optionsShown: ["A", "B", "C", "D"],
+            attemptContext: .immediateRescue
+        )
+        manager.recordAnswer(
+            profileId: profile.id,
+            letter: "A",
+            wasCorrect: false,
+            asTarget: true,
+            mistakeType: .impulsiveTap,
+            selectedWrongLetter: "B",
+            optionsShown: ["A", "B", "C", "D"],
+            attemptContext: .independent
+        )
+
+        XCTAssertEqual(manager.profiles[0].letterStats["A"]?.memoryState.independentReviews, 0)
+        XCTAssertNil(manager.profiles[0].gridPerformanceStats[4])
+    }
+
+    @MainActor
+    func testIndependentRoundRecordsGridAbilityAndConfusionOpportunity() {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            hasCompletedCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        manager.recordAnswer(
+            profileId: profile.id,
+            letter: "B",
+            wasCorrect: false,
+            asTarget: true,
+            mistakeType: .confusion,
+            selectedWrongLetter: "D",
+            optionsShown: ["A", "B", "D", "M"],
+            attemptContext: .independent
+        )
+
+        XCTAssertEqual(manager.profiles[0].gridPerformanceStats[4]?.independentAttempts, 1)
+        let evidence = manager.profiles[0].letterStats["B"]?.confusionEvidence["D"]
+        XCTAssertEqual(evidence?.opportunities, 1)
+        XCTAssertEqual(evidence?.mistakes, 1)
+    }
+
+    func testGridPromotionNeedsDemonstratedAbilityAndStrongPool() {
+        let language = GameLanguage.english
+        let passedFour = gridStat(correct: 12)
+        let passedSix = gridStat(correct: 16)
+
+        XCTAssertEqual(
+            AlphabetLevel.letterOptionsPerRound(
+                knownLetterCount: 23,
+                strongKnownLetterCount: 23,
+                gridPerformance: [:],
+                language: language
+            ),
+            4
+        )
+        XCTAssertEqual(
+            AlphabetLevel.letterOptionsPerRound(
+                knownLetterCount: 23,
+                strongKnownLetterCount: 23,
+                gridPerformance: [4: passedFour],
+                language: language
+            ),
+            6
+        )
+        XCTAssertEqual(
+            AlphabetLevel.letterOptionsPerRound(
+                knownLetterCount: 23,
+                strongKnownLetterCount: 23,
+                gridPerformance: [4: passedFour, 6: passedSix],
+                language: language
+            ),
+            8
+        )
+        XCTAssertEqual(
+            AlphabetLevel.letterOptionsPerRound(
+                knownLetterCount: 23,
+                strongKnownLetterCount: 8,
+                previousValue: 8,
+                gridPerformance: [4: passedFour, 6: passedSix],
+                language: language
+            ),
+            6
+        )
+    }
+
+    @MainActor
+    func testWeakTargetUsesFourChoicesEvenAfterEightGridEarned() {
+        let known = Set(GameLanguage.english.letters.prefix(23))
+        var stats = knownStats(for: known)
+        var weak = LetterStat()
+        weak.recordTargetAttempt(correct: false)
+        weak.recordTargetAttempt(correct: false)
+        stats["Z"] = weak
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: stats,
+            hasCompletedCalibration: true,
+            currentFocusLetter: "Z",
+            everMasteredLetters: known,
+            introducedLetters: known.union(["Z"]),
+            gridPerformanceStats: [
+                4: gridStat(correct: 12),
+                6: gridStat(correct: 16)
+            ]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: "Z",
+            focusScaffoldingLevel: 3
+        )
+
+        let state = AdaptiveGameState(profile: profile, plan: plan, profileManager: manager)
+        if state.targetLetter != "Z" {
+            _ = state.processAnswer(state.targetLetter)
+            state.setupNewRound()
+        }
+
+        XCTAssertEqual(profile.letterOptionsPerRound, 8)
+        XCTAssertEqual(state.targetLetter, "Z")
+        XCTAssertEqual(state.displayedLetters.count, 4)
+        XCTAssertEqual(Set(state.displayedLetters).count, 4)
+    }
+
+    func testConfusionEvidenceDecaysAndRetiresAfterCleanDiscriminations() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var evidence = LetterConfusionEvidence()
+        evidence.record(wasMistake: true, at: start)
+        evidence.record(wasMistake: true, at: start)
+        evidence.record(wasMistake: false, at: start)
+        XCTAssertTrue(evidence.isActive(at: start))
+
+        for offset in 1...5 {
+            evidence.record(wasMistake: false, at: start.addingTimeInterval(Double(offset)))
+        }
+
+        XCTAssertFalse(evidence.isActive(at: start.addingTimeInterval(5)))
+        XCTAssertLessThan(
+            evidence.priority(at: start.addingTimeInterval(90 * 86_400)),
+            evidence.priority(at: start)
+        )
+    }
+
+    @MainActor
+    func testWeeklyNeedsReviewCreatesConcreteFollowUp() {
+        let today = LocalDay.today()
+        let assessment = WeeklyLetterAssessment(
+            scheduledFor: today,
+            startedOn: today,
+            cohortLetters: ["A"],
+            strategy: .adaptiveAudit,
+            assessmentRoundTarget: 1,
+            dailyGoalTarget: 1,
+            hardRoundCap: 1,
+            results: [
+                "A": WeeklyAssessmentLetterResult(
+                    bucket: .solid,
+                    plannedAttempts: 1,
+                    maxExtensions: 0
+                )
+            ]
+        )
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: ["A": knownStat()],
+            hasCompletedCalibration: true,
+            activeWeeklyAssessment: assessment,
+            introducedLetters: ["A"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let before = Date()
+
+        manager.recordAnswer(
+            profileId: profile.id,
+            letter: "A",
+            wasCorrect: false,
+            asTarget: true,
+            mistakeType: .confusion,
+            selectedWrongLetter: "B",
+            optionsShown: ["A", "B", "C", "D"],
+            intent: .weeklyAssessment,
+            attemptContext: .independent,
+            countsTowardDailyPractice: true
+        )
+
+        XCTAssertEqual(manager.profiles[0].activeWeeklyAssessment?.outcome(for: "A"), .needsReview)
+        XCTAssertTrue(manager.profiles[0].activeWeeklyAssessment?.isCompleted == true)
+        let followUp = manager.profiles[0].letterStats["A"]?.memoryState.followUpAt
+        XCTAssertNotNil(followUp)
+        XCTAssertLessThanOrEqual(followUp!.timeIntervalSince(before), 86_405)
+    }
+
+    func testSeededMemorySimulationReviewsFragileLettersMoreOften() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func simulate(missEvery: Int) -> (reviews: Int, state: LetterMemoryState) {
+            var state = LetterMemoryState()
+            var reviews = 0
+            for day in 0..<180 {
+                let date = start.addingTimeInterval(Double(day) * 86_400)
+                guard state.independentReviews == 0 || state.isDue(at: date) else { continue }
+                reviews += 1
+                let correct = missEvery == 0 || reviews % missEvery != 0
+                state = AdaptiveLearningScheduler.recording(state, correct: correct, at: date)
+            }
+            return (reviews, state)
+        }
+
+        let stable = simulate(missEvery: 0)
+        let fragile = simulate(missEvery: 3)
+
+        XCTAssertLessThan(stable.reviews, 20)
+        XCTAssertGreaterThan(stable.state.stabilityDays, 30)
+        XCTAssertGreaterThan(fragile.reviews, stable.reviews)
+        XCTAssertGreaterThan(fragile.state.lapseCount, 0)
     }
 
     private func firebasePlist() throws -> [String: Any] {
@@ -3879,16 +4309,19 @@ final class PismenkaModelTests: XCTestCase {
         Dictionary(uniqueKeysWithValues: letters.map { ($0, knownStat()) })
     }
 
+    private func gridStat(correct: Int, incorrect: Int = 0) -> GridPerformanceStat {
+        var stat = GridPerformanceStat()
+        for _ in 0..<correct { stat.record(correct: true) }
+        for _ in 0..<incorrect { stat.record(correct: false) }
+        return stat
+    }
+
     private func mostRecentSunday(onOrBefore day: LocalDay) -> LocalDay {
         var candidate = day
         while !candidate.isSunday() {
             candidate = candidate.adding(days: -1)
         }
         return candidate
-    }
-
-    private func cycleStartForDueWeeklyReview(on day: LocalDay) -> LocalDay {
-        mostRecentSunday(onOrBefore: day).adding(days: -1)
     }
 
     private func parentMarkedStats(for letters: Set<String>) -> [String: LetterStat] {
@@ -3936,6 +4369,7 @@ final class PismenkaModelTests: XCTestCase {
         for (key, count) in confusedWith {
             for _ in 0..<count {
                 stat.recordConfusion(with: key)
+                stat.recordConfusionOpportunity(with: key, wasMistake: true)
             }
         }
         return stat

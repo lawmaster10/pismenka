@@ -284,6 +284,15 @@ struct LetterStat: Codable, Equatable {
     /// dashboard only and never feeds the adaptive model.
     var parentNote: String?
 
+    /// Per-letter forgetting state used by the due-date scheduler. This is
+    /// updated only when `recordTargetAttempt` receives independent evidence.
+    var memoryState: LetterMemoryState
+
+    /// Pair-level confusion evidence, keyed by the displayed distractor.
+    /// Unlike `confusedWith`, this includes the number of actual opportunities
+    /// and recent clean discriminations, so old mistakes can retire.
+    var confusionEvidence: [String: LetterConfusionEvidence]
+
     init(
         recentResults: [Bool] = [],
         targetAttempts: Int = 0,
@@ -299,7 +308,9 @@ struct LetterStat: Codable, Equatable {
         recentResponseTimes: [TimeInterval] = [],
         wasKnownBefore: Bool = false,
         demotedAt: Date? = nil,
-        parentNote: String? = nil
+        parentNote: String? = nil,
+        memoryState: LetterMemoryState? = nil,
+        confusionEvidence: [String: LetterConfusionEvidence] = [:]
     ) {
         self.recentResults = recentResults
         self.targetAttempts = targetAttempts
@@ -316,6 +327,13 @@ struct LetterStat: Codable, Equatable {
         self.wasKnownBefore = wasKnownBefore
         self.demotedAt = demotedAt
         self.parentNote = parentNote
+        self.memoryState = memoryState ?? AdaptiveLearningScheduler.migratedState(
+            targetAttempts: targetAttempts,
+            targetCorrect: targetCorrect,
+            recentResults: recentResults,
+            lastTestedAt: lastTestedAt
+        )
+        self.confusionEvidence = confusionEvidence
     }
 
     /// Decoder tolerant of older payloads — both newer fields and renamed-from
@@ -360,6 +378,30 @@ struct LetterStat: Codable, Equatable {
         wasKnownBefore = try c.decodeIfPresent(Bool.self, forKey: .wasKnownBefore) ?? false
         demotedAt = try c.decodeIfPresent(Date.self, forKey: .demotedAt)
         parentNote = try c.decodeIfPresent(String.self, forKey: .parentNote)
+        memoryState = try c.decodeIfPresent(LetterMemoryState.self, forKey: .memoryState)
+            ?? AdaptiveLearningScheduler.migratedState(
+                targetAttempts: targetAttempts,
+                targetCorrect: targetCorrect,
+                recentResults: recentResults,
+                lastTestedAt: lastTestedAt
+            )
+        confusionEvidence = [:]
+        if let saved = try c.decodeIfPresent(
+            [String: LetterConfusionEvidence].self,
+            forKey: .confusionEvidence
+        ) {
+            confusionEvidence = saved
+        } else {
+            for (key, count) in confusedWith {
+                confusionEvidence[key] = LetterConfusionEvidence(
+                    opportunities: count,
+                    mistakes: count,
+                    recentOutcomes: Array(repeating: true, count: min(count, LetterConfusionEvidence.recentWindow)),
+                    lastOpportunityAt: lastTestedAt,
+                    lastMistakeAt: lastTestedAt
+                )
+            }
+        }
     }
 
     /// Custom encoder that writes only the canonical fields. Legacy keys
@@ -386,6 +428,8 @@ struct LetterStat: Codable, Equatable {
         try c.encode(wasKnownBefore, forKey: .wasKnownBefore)
         try c.encodeIfPresent(demotedAt, forKey: .demotedAt)
         try c.encodeIfPresent(parentNote, forKey: .parentNote)
+        try c.encode(memoryState, forKey: .memoryState)
+        try c.encode(confusionEvidence, forKey: .confusionEvidence)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -397,6 +441,7 @@ struct LetterStat: Codable, Equatable {
         case confusedWith, impulsiveSelections
         case promptReplayCount, recentResponseTimes
         case wasKnownBefore, demotedAt, parentNote
+        case memoryState, confusionEvidence
         // Legacy keys — decoded only so older payloads that wrote
         // `exposureCount` as a stored field (Phase 1a and earlier) can still
         // be read; we never write them back.
@@ -429,6 +474,7 @@ struct LetterStat: Codable, Equatable {
         }
         targetAttempts += 1
         if correct { targetCorrect += 1 }
+        memoryState = AdaptiveLearningScheduler.recording(memoryState, correct: correct, at: date)
 
         // Rolling 10-sample response-time window. Two cleanup rules:
         //
@@ -467,6 +513,18 @@ struct LetterStat: Codable, Equatable {
     /// instead).
     mutating func recordConfusion(with selectedKey: String) {
         confusedWith[selectedKey, default: 0] += 1
+    }
+
+    /// Record one real chance to discriminate the target from `otherKey`.
+    /// Call once for every distractor that was actually displayed.
+    mutating func recordConfusionOpportunity(
+        with otherKey: String,
+        wasMistake: Bool,
+        at date: Date = Date()
+    ) {
+        var evidence = confusionEvidence[otherKey] ?? LetterConfusionEvidence()
+        evidence.record(wasMistake: wasMistake, at: date)
+        confusionEvidence[otherKey] = evidence
     }
 
     /// Record an impulsive wrong tap (sub-impulse-threshold response).
@@ -722,35 +780,36 @@ struct LetterStat: Codable, Equatable {
         return .slow
     }
 
-    /// Combined "how badly do we want to revisit this letter in warm-up?"
-    /// score, used by the warm-up target picker.
-    ///
-    /// Two signals are weighted together:
-    ///
-    /// | Component  | Weight | Source                                                |
-    /// |------------|--------|-------------------------------------------------------|
-    /// | weakness   | 0.6    | `1 - recentAccuracy(window: 5)`                        |
-    /// | staleness  | 0.4    | days since `lastTestedAt`, saturating at 14 days       |
-    ///
-    /// Slowness used to contribute a third signal (0.2 weight), but for a
-    /// distractible 3-year-old "slow on this letter" is mostly distraction
-    /// noise, not weakness. Drilling a known-but-slow letter at the
-    /// expense of an actually-weak letter wasted practice time. The
-    /// fluency upgrade lives in `isFluentKnown` instead — fast medians
-    /// earn a bonus tier, but slow medians never push warm-up priority up.
+    /// Due-date priority used by warm-up, drill review, and maintenance.
+    /// Difficulty and stability are personalized per letter; there is no
+    /// global 14-day staleness saturation.
     var reviewPriority: Double {
-        let recentAcc = recentAccuracy(window: 5)
-        let weakness: Double = recentResults.isEmpty ? 0 : (1 - recentAcc)
+        reviewPriority(at: Date())
+    }
 
-        let staleness: Double
-        if let last = lastTestedAt {
-            let days = Date().timeIntervalSince(last) / 86_400.0
-            staleness = min(1.0, max(0.0, days / LetterStat.stalenessSaturationDays))
+    func reviewPriority(at date: Date) -> Double {
+        AdaptiveLearningScheduler.priority(
+            state: memoryState,
+            recentAccuracy: recentResults.isEmpty ? 0.5 : recentAccuracy(window: 5),
+            at: date
+        )
+    }
+
+    func predictedRetrievability(at date: Date = Date()) -> Double {
+        memoryState.retrievability(at: date)
+    }
+
+    func isReviewDue(at date: Date = Date()) -> Bool {
+        memoryState.isDue(at: date)
+    }
+
+    mutating func scheduleFollowUp(afterDays days: Int, from date: Date = Date()) {
+        let followUp = date.addingTimeInterval(Double(max(0, days)) * 86_400)
+        if let existing = memoryState.followUpAt {
+            memoryState.followUpAt = min(existing, followUp)
         } else {
-            staleness = 0
+            memoryState.followUpAt = followUp
         }
-
-        return 0.6 * weakness + 0.4 * staleness
     }
 }
 

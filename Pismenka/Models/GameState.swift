@@ -481,6 +481,7 @@ final class AdaptiveGameState: ObservableObject {
     private var previousTarget: String?
     private var recentTargetLetters: [String] = []
     private let recentTargetMemoryLimit = 3
+    private var strongAuditRoundsScheduled: Int = 0
 
     /// Weighted "good encounters" accumulator that drives the `practicePro`
     /// stamp in focus-letter sessions. See the award block in `processAnswer`
@@ -598,6 +599,7 @@ final class AdaptiveGameState: ObservableObject {
     /// can reach the same floor a 6-tier session does, and walks them back
     /// out one streak at a time so recovery isn't an abrupt 4 → 8 snap.
     private var governorEaseSteps: Int = 0
+    private var governorCooldownIndependentRounds: Int = 0
 
     /// Focus-target accuracy within this session. Used only for the governor
     /// trip rule; durable learning stats remain in `ProfileManager`.
@@ -802,6 +804,36 @@ final class AdaptiveGameState: ObservableObject {
         return max(4, stepped)
     }
 
+    private func resolvedLetterOptionCount(
+        for target: String,
+        profile: Profile,
+        assessmentBucket: WeeklyAssessmentBucket? = nil,
+        forceFour: Bool = false
+    ) -> Int {
+        let base = optionsPerRound
+        guard !forceFour else { return min(base, 4) }
+        switch assessmentBucket {
+        case .cohort, .slipped, .emerging, .parentMarked:
+            return min(base, 4)
+        case .solid:
+            return min(base, 6)
+        case .fluent, .none:
+            break
+        }
+        guard profile.knownLetters.contains(target),
+              !profile.snapshot.recentlySlipped.contains(target),
+              target != activeDrillFocus(for: profile) else {
+            return min(base, 4)
+        }
+        if profile.snapshot.fluentKnownLetters.contains(target) {
+            return base
+        }
+        if profile.snapshot.strongKnownLetters.contains(target) {
+            return min(base, 6)
+        }
+        return min(base, 4)
+    }
+
     // MARK: Init
 
     init(
@@ -966,6 +998,7 @@ final class AdaptiveGameState: ObservableObject {
             recentRoundCorrectness: recentRoundCorrectness,
             governorCorrectStreak: governorCorrectStreak,
             governorEaseSteps: governorEaseSteps,
+            governorCooldownIndependentRounds: governorCooldownIndependentRounds,
             focusTargetAttemptsThisSession: focusTargetAttemptsThisSession,
             focusTargetCorrectThisSession: focusTargetCorrectThisSession,
             teachingMode: teachingMode,
@@ -1040,6 +1073,7 @@ final class AdaptiveGameState: ObservableObject {
         // when the eased state is on, 0 otherwise. That matches the old
         // behavior (single downshift) without re-tripping on restore.
         governorEaseSteps = snapshot.governorEaseSteps ?? (snapshot.liveDifficulty == .easierUntilStreak ? 1 : 0)
+        governorCooldownIndependentRounds = snapshot.governorCooldownIndependentRounds ?? 0
         focusTargetAttemptsThisSession = snapshot.focusTargetAttemptsThisSession
         focusTargetCorrectThisSession = snapshot.focusTargetCorrectThisSession
         teachingMode = snapshot.teachingMode
@@ -1321,7 +1355,7 @@ final class AdaptiveGameState: ObservableObject {
         if targetLetter == activeDrillFocus(for: profile) || targetLetter == profile.currentSyllableFocus || targetLetter == profile.currentWordFocus {
             value += 0.12
         }
-        if optionsPerRound > 4 { value += Double(optionsPerRound - 4) * 0.06 }
+        if displayedLetters.count > 4 { value += Double(displayedLetters.count - 4) * 0.06 }
         switch distractorPolicy {
         case .easyKnown, .governorEased:
             value -= 0.12
@@ -1410,10 +1444,22 @@ final class AdaptiveGameState: ObservableObject {
     /// count and the current session focus accuracy. The new mode affects the
     /// *next* round; the just-recorded `RoundEvent` carries the mode that was
     /// active when its round was generated.
-    private func updateDifficultyGovernor(wasCorrect: Bool, target: String) {
+    private func updateDifficultyGovernor(
+        wasCorrect: Bool,
+        target: String,
+        attemptContext: AttemptContext,
+        mistakeType: MistakeType,
+        optionCount: Int
+    ) {
+        guard !attemptContext.isAssistedForMastery, mistakeType != .impulsiveTap else {
+            return
+        }
+        if governorCooldownIndependentRounds > 0 {
+            governorCooldownIndependentRounds -= 1
+        }
         recentRoundCorrectness.append(wasCorrect)
-        if recentRoundCorrectness.count > 4 {
-            recentRoundCorrectness.removeFirst(recentRoundCorrectness.count - 4)
+        if recentRoundCorrectness.count > 5 {
+            recentRoundCorrectness.removeFirst(recentRoundCorrectness.count - 5)
         }
 
         let focusKey = sessionFocusKey
@@ -1424,8 +1470,8 @@ final class AdaptiveGameState: ObservableObject {
             }
         }
 
-        let lastFourWrongCount = recentRoundCorrectness.filter { !$0 }.count
-        let threeOfLastFourWrong = recentRoundCorrectness.count == 4 && lastFourWrongCount >= 3
+        let lastFour = recentRoundCorrectness.suffix(4)
+        let threeOfLastFourWrong = lastFour.count == 4 && lastFour.filter { !$0 }.count >= 3
         let heartsLow = heartsRemaining <= 2
         let focusAccuracyLow: Bool
         if focusKey != nil,
@@ -1436,30 +1482,30 @@ final class AdaptiveGameState: ObservableObject {
         } else {
             focusAccuracyLow = false
         }
-        let tripTriggered = threeOfLastFourWrong || heartsLow || focusAccuracyLow
+        let stickyTripAllowed = governorCooldownIndependentRounds == 0
+        let tripTriggered = threeOfLastFourWrong
+            || (stickyTripAllowed && (heartsLow || focusAccuracyLow))
 
         if liveDifficulty == .easierUntilStreak {
-            if wasCorrect {
-                governorCorrectStreak += 1
-                if governorCorrectStreak >= 2 {
-                    governorCorrectStreak = 0
-                    if governorEaseSteps > 1 {
-                        // Recover one tier at a time so an 8-tier session that
-                        // tripped twice walks back through 4 → 6 → 8 instead
-                        // of snapping straight from 4 to 8.
-                        governorEaseSteps -= 1
-                    } else {
-                        governorEaseSteps = 0
-                        liveDifficulty = .normal
-                    }
+            governorCorrectStreak = wasCorrect ? governorCorrectStreak + 1 : 0
+            let recoveryWindow = recentRoundCorrectness.suffix(5)
+            let recovered = recoveryWindow.count == 5
+                && recoveryWindow.filter { $0 }.count >= 4
+                && optionCount <= max(4, frozenLetterOptionsPerRound - 2 * governorEaseSteps)
+            if recovered {
+                governorCorrectStreak = 0
+                governorEaseSteps = max(0, governorEaseSteps - 1)
+                recentRoundCorrectness.removeAll()
+                if governorEaseSteps == 0 {
+                    liveDifficulty = .normal
+                    governorCooldownIndependentRounds = 3
                 }
                 return
             }
-            governorCorrectStreak = 0
             // Re-trip while already eased deepens the step (max 2 = 4-grid
             // floor). Clear the rolling window so the same wrongs that
             // caused the first trip can't cascade us straight to step 2.
-            if tripTriggered, governorEaseSteps < 2 {
+            if !wasCorrect, tripTriggered, governorEaseSteps < 2 {
                 governorEaseSteps += 1
                 recentRoundCorrectness.removeAll()
                 prioritizeRescueQueueForGovernor()
@@ -2077,7 +2123,13 @@ final class AdaptiveGameState: ObservableObject {
             }
         }
 
-        updateDifficultyGovernor(wasCorrect: wasCorrect, target: target)
+        updateDifficultyGovernor(
+            wasCorrect: wasCorrect,
+            target: target,
+            attemptContext: attemptContext,
+            mistakeType: mistakeType,
+            optionCount: displayedLetters.count
+        )
 
         let outcome = AnswerOutcome(
             wasCorrect: wasCorrect,
@@ -2258,7 +2310,18 @@ final class AdaptiveGameState: ObservableObject {
         // Distractors continue to be drawn from the confidence-ordered pool
         // because there we *want* the strongest letters (easy elimination is
         // the whole point of warm-up).
-        let priorityOrder = eligibleTargetCandidates(profile.snapshot.lettersByReviewPriority)
+        let dueKnown = profile.snapshot.dueReviewLetters.filter {
+            profile.knownLetters.contains($0)
+        }
+        let priorityOrder: [String]
+        if !dueKnown.isEmpty {
+            priorityOrder = eligibleTargetCandidates(dueKnown)
+        } else {
+            priorityOrder = eligibleTargetCandidates(
+                Array(profile.snapshot.auditReviewLetters.prefix(max(1, warmupLength)))
+            )
+            strongAuditRoundsScheduled += 1
+        }
         let confidence = profile.lettersByConfidence
         guard !priorityOrder.isEmpty else {
             buildPlainReviewRound(profile: profile)
@@ -2275,13 +2338,19 @@ final class AdaptiveGameState: ObservableObject {
             : candidate
         setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: priorityOrder)
         let target = targetLetter
+        let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
 
         // Distractors: enough other known letters from the confidence-ordered
         // pool to fill the current level's grid, never the focus letter.
         let pool0 = Set(confidence).subtracting([target, activeDrillFocus(for: profile) ?? ""])
-        let chosen = pickFiltered(from: Array(pool0), count: optionsPerRound - 1, target: target, profile: profile)
+        let chosen = pickFiltered(from: Array(pool0), count: optionCount - 1, target: target, profile: profile)
         // Warm-up never uses focus as the target, so isFocusTarget = false.
-        displayedLetters = placeAnswer(target: target, distractors: chosen, isFocusTarget: false)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: chosen,
+            isFocusTarget: false,
+            optionCount: optionCount
+        )
     }
 
     private func buildDrillRound(profile: Profile) {
@@ -2308,9 +2377,10 @@ final class AdaptiveGameState: ObservableObject {
             && (roundsThisSession + 1) >= firstFocusAppearanceDeadline
         let targetCandidate: String = mustForceFocus
             ? focus
-            : chooseDrillTarget(focus: focus, confidence: confidence)
+            : chooseDrillTarget(focus: focus, profile: profile)
         setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: confidence + [focus])
         let target = targetLetter
+        let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
 
         var distractors: [String] = []
         // Phase-based confusion policy for drill (§15):
@@ -2328,16 +2398,16 @@ final class AdaptiveGameState: ObservableObject {
         if target == focus {
             // Distractors split between easy (top of confidence) and normal
             // (rest of knownLetters), never including focus itself.
-            let easyCount = min(scaffolding, optionsPerRound - 1)
-            let normalCount = (optionsPerRound - 1) - easyCount
+            let easyCount = min(scaffolding, optionCount - 1)
+            let normalCount = (optionCount - 1) - easyCount
             distractors.append(contentsOf: pickEasyDistractors(profile: profile, target: target, exclude: [focus], count: easyCount))
             distractors.append(contentsOf: pickNormalDistractors(profile: profile, target: target, exclude: Set(distractors).union([focus]), count: normalCount, policy: normalPolicy))
         } else {
             // Target is a known letter. Focus occupies one slot (the "expose
             // them wrongly" trick); the remaining slots split easy/normal.
             distractors.append(focus)
-            let easyCount = min(scaffolding, optionsPerRound - 2)
-            let normalCount = (optionsPerRound - 2) - easyCount
+            let easyCount = min(scaffolding, optionCount - 2)
+            let normalCount = (optionCount - 2) - easyCount
             distractors.append(contentsOf: pickEasyDistractors(profile: profile, target: target, exclude: Set([focus]), count: easyCount))
             distractors.append(contentsOf: pickNormalDistractors(profile: profile, target: target, exclude: Set(distractors), count: normalCount, policy: normalPolicy))
             distractors = maybeInjectCameoLetter(
@@ -2352,7 +2422,8 @@ final class AdaptiveGameState: ObservableObject {
         displayedLetters = placeAnswer(
             target: target,
             distractors: distractors,
-            isFocusTarget: target == focus
+            isFocusTarget: target == focus,
+            optionCount: optionCount
         )
     }
 
@@ -2378,7 +2449,7 @@ final class AdaptiveGameState: ObservableObject {
         } else {
             assessmentTarget = nil
             assessmentBucket = nil
-            reviewCandidates = eligibleTargetCandidates(profile.lettersByConfidence)
+            reviewCandidates = schedulerReviewCandidates(profile: profile)
         }
 
         guard !reviewCandidates.isEmpty else {
@@ -2392,20 +2463,34 @@ final class AdaptiveGameState: ObservableObject {
             let targetCandidate = pool.randomElement() ?? "A"
             setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: pool)
             let target = targetLetter
-            let distractors = Array(pool.filter { $0 != target }.shuffled().prefix(optionsPerRound - 1))
+            let optionCount = resolvedLetterOptionCount(for: target, profile: profile, forceFour: true)
+            let distractors = Array(pool.filter { $0 != target }.shuffled().prefix(optionCount - 1))
             // Plain review only happens when there's no focus letter in play,
             // so isFocusTarget is always false here.
-            displayedLetters = placeAnswer(target: target, distractors: distractors, isFocusTarget: false)
+            displayedLetters = placeAnswer(
+                target: target,
+                distractors: distractors,
+                isFocusTarget: false,
+                optionCount: optionCount
+            )
             return
         }
-        // Bias toward weaker known letters (they need the practice).
-        let weighted = plan.dailyPracticeKind == .reviewTest ? reviewCandidates : Array(reviewCandidates.reversed())
-        var target = assessmentTarget ?? preferNotRecentlyTargeted(Array(weighted)) ?? reviewCandidates[0]
+        // Scheduler candidates are already ordered weak/due/audit and then by
+        // descending recall risk. Reversing this list would promote the
+        // strongest not-yet-due audit letter over actual remediation.
+        var target = assessmentTarget
+            ?? preferNotRecentlyTargeted(reviewCandidates)
+            ?? reviewCandidates[0]
         if reviewCandidates.count > 1, target == previousTarget {
             target = reviewCandidates.first(where: { $0 != previousTarget }) ?? target
         }
         setTargetLetter(target, profile: profile, fallbackCandidates: reviewCandidates)
         target = targetLetter
+        let optionCount = resolvedLetterOptionCount(
+            for: target,
+            profile: profile,
+            assessmentBucket: assessmentBucket
+        )
         // Plain review only runs in no-focus / expert sessions, on letters
         // the child has already proven they know. This is exactly the
         // "later review" stage from §15, so we actively prefer confusable
@@ -2428,13 +2513,18 @@ final class AdaptiveGameState: ObservableObject {
             reviewPolicy = levelAdjustedPolicy(profile.knownLetters.contains(target) ? .intentionallyPractice : .avoid)
         }
         let distractors = maybeInjectCameoLetter(
-            into: pickNormalDistractors(profile: profile, target: target, exclude: [], count: optionsPerRound - 1, policy: reviewPolicy),
+            into: pickNormalDistractors(profile: profile, target: target, exclude: [], count: optionCount - 1, policy: reviewPolicy),
             target: target,
             profile: profile,
             phase: .plainReview,
             confusionPolicy: reviewPolicy
         )
-        displayedLetters = placeAnswer(target: target, distractors: distractors, isFocusTarget: false)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: distractors,
+            isFocusTarget: false,
+            optionCount: optionCount
+        )
     }
 
     private func chooseWeeklyAssessmentTarget(profile: Profile) -> String? {
@@ -2471,26 +2561,25 @@ final class AdaptiveGameState: ObservableObject {
             return coverageTarget
         }
 
-        let scored = candidates
-            .map { letter -> (letter: String, score: Double) in
-                let result = assessment.result(for: letter)
-                let remaining = max(1, result.attemptCap - result.independentAttempts)
-                let misses = max(0, result.independentAttempts - result.independentCorrect)
-                let recencyPenalty = recentTargetLetters.contains(letter) ? 0.7 : 0
-                return (
-                    letter,
-                    Double(remaining)
-                        + Double(misses) * 0.5
-                        + assessmentBucketWeight(result.bucket)
-                        + (profile.letterStats[letter]?.reviewPriority ?? 0)
-                        - recencyPenalty
-                )
-            }
-            .sorted {
-                if $0.score != $1.score { return $0.score > $1.score }
-                return $0.letter < $1.letter
-            }
-            .map(\.letter)
+        var scoredEntries: [(letter: String, score: Double)] = []
+        for letter in candidates {
+            let result = assessment.result(for: letter)
+            let remaining = max(1, result.attemptCap - result.independentAttempts)
+            let misses = max(0, result.independentAttempts - result.independentCorrect)
+            let recencyPenalty: Double = recentTargetLetters.contains(letter) ? 0.7 : 0
+            let reviewPriority = profile.letterStats[letter]?.reviewPriority ?? 0
+            let score = Double(remaining)
+                + Double(misses) * 0.5
+                + assessmentBucketWeight(result.bucket)
+                + reviewPriority
+                - recencyPenalty
+            scoredEntries.append((letter: letter, score: score))
+        }
+        scoredEntries.sort {
+            if $0.score != $1.score { return $0.score > $1.score }
+            return $0.letter < $1.letter
+        }
+        let scored = scoredEntries.map(\.letter)
 
         return preferNotRecentlyTargeted(scored) ?? scored.first
     }
@@ -2573,7 +2662,7 @@ final class AdaptiveGameState: ObservableObject {
     }
 
     private func buildMaintenanceRound(profile: Profile) {
-        let priorityOrder = eligibleTargetCandidates(profile.snapshot.lettersByReviewPriority)
+        let priorityOrder = schedulerReviewCandidates(profile: profile)
         guard !priorityOrder.isEmpty else {
             buildPlainReviewRound(profile: profile)
             return
@@ -2584,13 +2673,14 @@ final class AdaptiveGameState: ObservableObject {
         }
         setTargetLetter(target, profile: profile, fallbackCandidates: priorityOrder)
         target = targetLetter
+        let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
         let policy = levelAdjustedPolicy(.intentionallyPractice)
         let distractors = maybeInjectCameoLetter(
             into: pickNormalDistractors(
                 profile: profile,
                 target: target,
                 exclude: [],
-                count: optionsPerRound - 1,
+                count: optionCount - 1,
                 policy: policy
             ),
             target: target,
@@ -2598,22 +2688,33 @@ final class AdaptiveGameState: ObservableObject {
             phase: .maintenance,
             confusionPolicy: policy
         )
-        displayedLetters = placeAnswer(target: target, distractors: distractors, isFocusTarget: false)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: distractors,
+            isFocusTarget: false,
+            optionCount: optionCount
+        )
     }
 
     private func buildExtraPracticeRound(profile: Profile, target: String) {
         setTargetLetter(target, profile: profile)
         let target = targetLetter
+        let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
         let basePolicy: LetterDifficulty.ConfusionPolicy = profile.knownLetters.contains(target) ? .intentionallyPractice : .avoid
         let policy = levelAdjustedPolicy(basePolicy)
         let distractors = pickNormalDistractors(
             profile: profile,
             target: target,
             exclude: [],
-            count: optionsPerRound - 1,
+            count: optionCount - 1,
             policy: policy
         )
-        displayedLetters = placeAnswer(target: target, distractors: distractors, isFocusTarget: false)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: distractors,
+            isFocusTarget: false,
+            optionCount: optionCount
+        )
     }
 
     private func buildSyllableRecognitionRound(
@@ -2639,7 +2740,12 @@ final class AdaptiveGameState: ObservableObject {
         let fallback = available.filter { $0 != target && !distractors.contains($0) }
         let chosen = Array((distractors + fallback).prefix(max(0, optionsPerRound - 1)))
         targetLetter = target
-        displayedLetters = placeAnswer(target: target, distractors: chosen, isFocusTarget: focus == target)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: chosen,
+            isFocusTarget: focus == target,
+            optionCount: optionsPerRound
+        )
         currentActivityKind = activity
         let unit = SyllableCurriculum.unit(target, language: profile.language)
         let segments: [FocusTarget] = activity == .syllableBlending
@@ -2669,7 +2775,12 @@ final class AdaptiveGameState: ObservableObject {
         let fallback = available.filter { $0 != target && !distractors.contains($0) }
         let chosen = Array((distractors + fallback).prefix(max(0, optionsPerRound - 1)))
         targetLetter = target
-        displayedLetters = placeAnswer(target: target, distractors: chosen, isFocusTarget: false)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: chosen,
+            isFocusTarget: false,
+            optionCount: optionsPerRound
+        )
         currentActivityKind = .syllableCalibration
         currentRound = LearningRound(
             target: .syllable(target),
@@ -2749,7 +2860,12 @@ final class AdaptiveGameState: ObservableObject {
         let fallback = available.filter { $0 != target && !distractors.contains($0) }
         let chosen = Array((distractors + fallback).prefix(max(0, optionsPerRound - 1)))
         targetLetter = target
-        displayedLetters = placeAnswer(target: target, distractors: chosen, isFocusTarget: focus == target)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: chosen,
+            isFocusTarget: focus == target,
+            optionCount: optionsPerRound
+        )
         currentActivityKind = activity
         currentRound = LearningRound(
             target: .word(target),
@@ -2770,9 +2886,10 @@ final class AdaptiveGameState: ObservableObject {
     }
 
     private func eligibleContrastPairs(profile: Profile) -> [(target: String, confused: String)] {
-        var pairs: [(target: String, confused: String)] = []
+        var scored: [(target: String, confused: String, priority: Double)] = []
+        let now = Date()
         for (targetKey, stat) in profile.letterStats where stat.targetAttempts >= 5 && LetterDifficulty.isEligibleTarget(targetKey, language: language) {
-            for (otherKey, count) in stat.confusedWith where count >= 2 {
+            for (otherKey, evidence) in stat.confusionEvidence where evidence.isActive(at: now) {
                 guard let otherStat = profile.letterStats[otherKey],
                       otherStat.targetAttempts >= 5,
                       LetterDifficulty.isEligibleTarget(otherKey, language: language),
@@ -2780,14 +2897,24 @@ final class AdaptiveGameState: ObservableObject {
                       profile.snapshot.fluentKnownLetters.contains(otherKey) else {
                     continue
                 }
-                pairs.append((target: targetKey, confused: otherKey))
+                scored.append((
+                    target: targetKey,
+                    confused: otherKey,
+                    priority: evidence.priority(at: now)
+                ))
             }
         }
-        return pairs
+        return scored
+            .sorted {
+                if $0.priority != $1.priority { return $0.priority > $1.priority }
+                if $0.target != $1.target { return $0.target < $1.target }
+                return $0.confused < $1.confused
+            }
+            .map { (target: $0.target, confused: $0.confused) }
     }
 
     private func buildContrastRound(profile: Profile) {
-        guard let pair = eligibleContrastPairs(profile: profile).randomElement() else {
+        guard let pair = eligibleContrastPairs(profile: profile).first else {
             buildPlainReviewRound(profile: profile)
             currentRoundIntent = governedIntent(.staleReview)
             return
@@ -2798,20 +2925,26 @@ final class AdaptiveGameState: ObservableObject {
         currentRoundIntent = .contrastPair
         setTargetLetter(pair.target, profile: profile, fallbackCandidates: [pair.target])
         let target = targetLetter
+        let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
 
         let strongKnown = profile.lettersByConfidence.filter {
             $0 != target && $0 != pair.confused
         }
         let extras = pickFiltered(
             from: strongKnown,
-            count: optionsPerRound - 2,
+            count: optionCount - 2,
             target: target,
             profile: profile,
             policy: .intentionallyPractice,
             excludeAdditional: [pair.confused]
         )
         let distractors = [pair.confused] + extras
-        displayedLetters = placeAnswer(target: target, distractors: distractors, isFocusTarget: false)
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: distractors,
+            isFocusTarget: false,
+            optionCount: optionCount
+        )
     }
 
     /// Build a rescue round around the queued `item`. Difficulty
@@ -2830,6 +2963,7 @@ final class AdaptiveGameState: ObservableObject {
     private func buildRescueRound(profile: Profile, item: RescueItem) {
         setTargetLetter(item.letterKey, profile: profile)
         let target = targetLetter
+        let optionCount = resolvedLetterOptionCount(for: target, profile: profile, forceFour: true)
         let distractors: [String]
         switch item.difficulty {
         case .easy:
@@ -2837,14 +2971,14 @@ final class AdaptiveGameState: ObservableObject {
                 profile: profile,
                 target: target,
                 exclude: [],
-                count: optionsPerRound - 1
+                count: optionCount - 1
             )
         case .mid:
             distractors = pickNormalDistractors(
                 profile: profile,
                 target: target,
                 exclude: [],
-                count: optionsPerRound - 1,
+                count: optionCount - 1,
                 policy: .avoid
             )
         }
@@ -2854,7 +2988,8 @@ final class AdaptiveGameState: ObservableObject {
         displayedLetters = placeAnswer(
             target: target,
             distractors: distractors,
-            isFocusTarget: target == activeDrillFocus(for: profile)
+            isFocusTarget: target == activeDrillFocus(for: profile),
+            optionCount: optionCount
         )
     }
 
@@ -2876,10 +3011,45 @@ final class AdaptiveGameState: ObservableObject {
     private func placeAnswer(
         target: String,
         distractors: [String],
-        isFocusTarget: Bool
+        isFocusTarget: Bool,
+        optionCount: Int
     ) -> [String] {
-        let pool = Array(distractors.prefix(optionsPerRound - 1)).shuffled()
-        let position = chooseCorrectPosition(isFocusTarget: isFocusTarget)
+        let desiredCount = min(8, max(2, optionCount))
+        var seen: Set<String> = [target]
+        var completed: [String] = []
+        for candidate in distractors where !seen.contains(candidate) {
+            completed.append(candidate)
+            seen.insert(candidate)
+            if completed.count == desiredCount - 1 { break }
+        }
+        if completed.count < desiredCount - 1 {
+            let confusing = LetterDifficulty.visuallyConfusingPairs[target] ?? []
+            // The final exact-fill fallback is letter-only. Reading rounds
+            // must never mix stray alphabet glyphs into a syllable/word grid.
+            let letterFallback = LetterDifficulty.isEligibleTarget(target, language: language)
+                ? language.letters
+                : []
+            let gentleFallback = letterFallback.filter {
+                !seen.contains($0) && !confusing.contains($0)
+            }.shuffled()
+            let finalFallback = letterFallback.filter { !seen.contains($0) }.shuffled()
+            for candidate in gentleFallback + finalFallback where !seen.contains(candidate) {
+                completed.append(candidate)
+                seen.insert(candidate)
+                if completed.count == desiredCount - 1 { break }
+            }
+        }
+        let actualCount = completed.count + 1
+        if sessionCorrectPositionCounts.count < actualCount {
+            sessionCorrectPositionCounts.append(
+                contentsOf: Array(repeating: 0, count: actualCount - sessionCorrectPositionCounts.count)
+            )
+        }
+        let pool = completed.shuffled()
+        let position = chooseCorrectPosition(
+            isFocusTarget: isFocusTarget,
+            optionCount: actualCount
+        )
         var grid = pool
         grid.insert(target, at: min(position, grid.count))
         recordCorrectPosition(position, isFocusTarget: isFocusTarget)
@@ -2903,8 +3073,8 @@ final class AdaptiveGameState: ObservableObject {
     ///
     /// We always keep at least one legal candidate by relaxing the focus
     /// rule (but never the "twice-in-a-row" rule) if needed.
-    private func chooseCorrectPosition(isFocusTarget: Bool) -> Int {
-        var legal = Set(0..<optionsPerRound)
+    private func chooseCorrectPosition(isFocusTarget: Bool, optionCount: Int) -> Int {
+        var legal = Set(0..<optionCount)
 
         // Rule 1: forbid a third repeat.
         if recentCorrectPositions.count >= 2,
@@ -2923,7 +3093,7 @@ final class AdaptiveGameState: ObservableObject {
         // Rule 3: prefer least-used slot(s).
         let minCount = legal.map { sessionCorrectPositionCounts[$0] }.min() ?? 0
         let candidates = legal.filter { sessionCorrectPositionCounts[$0] == minCount }
-        return candidates.randomElement() ?? Int.random(in: 0..<optionsPerRound)
+        return candidates.randomElement() ?? Int.random(in: 0..<optionCount)
     }
 
     /// Records the chosen correct-answer position into the rolling history
@@ -2945,28 +3115,48 @@ final class AdaptiveGameState: ObservableObject {
         }
     }
 
-    private func chooseDrillTarget(focus: String, confidence: [String]) -> String {
+    private var strongAuditRoundBudget: Int {
+        max(2, Int(ceil(Double(max(1, plan.dailyGoalTarget)) * 0.15)))
+    }
+
+    private func schedulerReviewCandidates(profile: Profile) -> [String] {
+        let urgent = profile.snapshot.weakReviewLetters + profile.snapshot.dueReviewLetters
+        if !urgent.isEmpty {
+            return uniqueEligibleTargets(urgent)
+        }
+        let audit = Array(profile.snapshot.auditReviewLetters.prefix(max(2, strongAuditRoundBudget)))
+        return uniqueEligibleTargets(audit)
+    }
+
+    private func chooseDrillTarget(focus: String, profile: Profile) -> String {
         let roll = Double.random(in: 0..<1)
         // Ask the focus regularly, but keep the last few targets varied so
         // daily practice feels less like the same prompt on a loop.
         let focusChance = focusTargetChance()
-        let lowerConfidenceChance = liveDifficulty == .easierUntilStreak ? 0.75 : 0.85
 
         if roll < focusChance {
-            if recentTargetLetters.contains(focus), !confidence.isEmpty {
-                return preferNotRecentlyTargeted(confidence) ?? confidence.randomElement() ?? focus
+            let urgent = uniqueEligibleTargets(
+                profile.snapshot.weakReviewLetters + profile.snapshot.dueReviewLetters
+            ).filter { $0 != focus }
+            if recentTargetLetters.contains(focus), !urgent.isEmpty {
+                return preferNotRecentlyTargeted(urgent) ?? focus
             }
             return focus
         }
-        // Lower-confidence known review.
-        if roll < lowerConfidenceChance, !confidence.isEmpty {
-            let lowerHalf = Array(confidence.suffix(max(1, confidence.count / 2)))
-            return preferNotRecentlyTargeted(lowerHalf) ?? lowerHalf.randomElement() ?? focus
+
+        let urgent = uniqueEligibleTargets(
+            profile.snapshot.weakReviewLetters + profile.snapshot.dueReviewLetters
+        ).filter { $0 != focus }
+        if let due = preferNotRecentlyTargeted(urgent) {
+            return due
         }
-        // 15% high-confidence known
-        if !confidence.isEmpty {
-            let topHalf = Array(confidence.prefix(max(1, confidence.count / 2)))
-            return preferNotRecentlyTargeted(topHalf) ?? topHalf.randomElement() ?? focus
+
+        if strongAuditRoundsScheduled < strongAuditRoundBudget {
+            let audits = profile.snapshot.auditReviewLetters.filter { $0 != focus }
+            if let audit = preferNotRecentlyTargeted(audits) {
+                strongAuditRoundsScheduled += 1
+                return audit
+            }
         }
         return focus
     }

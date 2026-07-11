@@ -109,31 +109,49 @@ enum AlphabetLevel: String, Codable, CaseIterable, Comparable {
         knownLetterCount: Int,
         strongKnownLetterCount: Int,
         previousValue: Int? = nil,
+        gridPerformance: [Int: GridPerformanceStat] = [:],
         language: GameLanguage
     ) -> Int {
         let eightOptionThreshold = max(20, Int(ceil(Double(language.letters.count) * 0.85)))
         let eightStrongRequirement = max(0, eightOptionThreshold - 3)
         let sixOptionThreshold = 15
         let sixStrongRequirement = 10
+        let hasSixSafety = knownLetterCount >= sixOptionThreshold
+            && strongKnownLetterCount >= sixStrongRequirement
+        let hasEightSafety = knownLetterCount >= eightOptionThreshold
+            && strongKnownLetterCount >= eightStrongRequirement
 
-        // Promotion (raw) tier from current evidence.
+        // Promotion is earned by performance at the current tier. Alphabet
+        // counts remain a pool-safety check, not the evidence of visual-search
+        // ability itself.
         let raw: Int
-        if knownLetterCount >= eightOptionThreshold,
-           strongKnownLetterCount >= eightStrongRequirement {
+        if hasEightSafety,
+           gridPerformance[6]?.supportsPromotion(minimumTrials: 16) == true {
             raw = 8
-        } else if knownLetterCount >= sixOptionThreshold,
-                  strongKnownLetterCount >= sixStrongRequirement {
+        } else if hasSixSafety,
+                  gridPerformance[4]?.supportsPromotion(minimumTrials: 12) == true {
             raw = 6
         } else {
             raw = 4
         }
 
-        // Demotion hysteresis. Promotions happen on the raw rule above; only
-        // demotion (raw < previous) is dampened so a single slipped letter
-        // can't shrink the grid for the next session.
+        // Existing 6/8-grid profiles keep a provisional continuity window while
+        // the new model collects evidence. Once enough outcomes exist, recent
+        // failure can demote. Both known and strong-known evidence participate
+        // in hysteresis; the old known-only hold could retain an unsafe grid.
         guard let previous = previousValue, raw < previous else { return raw }
-        if previous == 8, knownLetterCount >= eightOptionThreshold - 2 { return 8 }
-        if previous >= 6, knownLetterCount >= sixOptionThreshold - 2 { return max(raw, 6) }
+        if previous == 8 {
+            let safetyHeld = knownLetterCount >= eightOptionThreshold - 2
+                && strongKnownLetterCount >= eightStrongRequirement - 2
+            let performanceHeld = gridPerformance[8]?.supportsMaintenance ?? true
+            if safetyHeld && performanceHeld { return 8 }
+        }
+        if previous >= 6 {
+            let safetyHeld = knownLetterCount >= sixOptionThreshold - 2
+                && strongKnownLetterCount >= sixStrongRequirement - 2
+            let performanceHeld = gridPerformance[6]?.supportsMaintenance ?? true
+            if safetyHeld && performanceHeld { return max(raw, 6) }
+        }
         return raw
     }
 

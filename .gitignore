@@ -4,6 +4,7 @@ build/
 xcuserdata/
 *.xcuserstate
 /GoogleService-Info*.plist
+AuthKey_*.p8
 .env
 .DS_Store
 .astro/

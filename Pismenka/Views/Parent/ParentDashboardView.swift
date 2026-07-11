@@ -120,6 +120,7 @@ struct ParentDashboardView: View {
                         needsAttentionSection
                         focusCard
                         progressGlanceCard
+                        letterPaletteCard
 
                         // Tier 2 — 1-2 minute read. Weekly test summary stays
                         // compact (cohort tile grid only, per-letter list
@@ -231,7 +232,7 @@ struct ParentDashboardView: View {
                     pendingReset = .weeklyTest
                 }
             } label: {
-                Label("Skip current weekly test", systemImage: "forward.end.circle")
+                Label("Skip current progress check", systemImage: "forward.end.circle")
             }
         }
         Button {
@@ -305,8 +306,8 @@ struct ParentDashboardView: View {
             )
         case .weeklyTest:
             return Alert(
-                title: Text("Skip current weekly test?"),
-                message: Text("The answers \(live.displayName) already gave will stay in Review/test results. The test will end now, today's progress counter restarts, and the next play session can introduce a new letter today."),
+                title: Text("Skip current progress check?"),
+                message: Text("The answers \(live.displayName) already gave will stay in Review/test results. The progress check will end now, today's progress counter restarts, and the next play session can introduce a new letter today."),
                 primaryButton: .default(Text("Skip test")) {
                     checkpointStore.clear(profileId: live.id)
                     profileManager.skipActiveWeeklyAssessment(profileId: live.id)
@@ -516,6 +517,157 @@ struct ParentDashboardView: View {
         Set(live.language.letters)
     }
 
+    /// Full alphabet in its canonical teaching order (so every letter shows
+    /// in the palette, including ones not yet seen — which is exactly the
+    /// "what's still missing?" question parents open this screen to answer).
+    private var orderedAlphabetLetters: [String] {
+        live.language.letters
+    }
+
+    // MARK: - Letter palette (at-a-glance traffic-light map)
+
+    /// Three-state read of a single letter for the palette, collapsing the
+    /// richer internal model into the green/yellow/red traffic light a
+    /// parent can scan in two seconds. `notIntroduced` is a faded variant of
+    /// red ("not known yet, but it isn't the child's fault — we haven't
+    /// taught it") so a parent can still tell "struggling" from "untouched".
+    private enum LetterPaletteCategory {
+        case known
+        case maybe
+        case needsPractice
+        case notIntroduced
+
+        var accessibilityDescription: String {
+            switch self {
+            case .known: return "knows it"
+            case .maybe: return "maybe knows it"
+            case .needsPractice: return "doesn't know it yet"
+            case .notIntroduced: return "not introduced yet"
+            }
+        }
+    }
+
+    private static let paletteGreen = Color(red: 0.2, green: 0.65, blue: 0.3)
+    private static let paletteYellow = Color(red: 0.96, green: 0.72, blue: 0.16)
+    private static let paletteRed = Color(red: 0.93, green: 0.39, blue: 0.31)
+
+    private func paletteCategory(
+        for letter: String,
+        summary: ParentLetterKnowledgeSummary
+    ) -> LetterPaletteCategory {
+        if summary.confidentlyKnownLetters.contains(letter) { return .known }
+        if summary.likelyKnownLetters.contains(letter) { return .maybe }
+        if summary.notIntroducedLetters.contains(letter) { return .notIntroduced }
+        return .needsPractice
+    }
+
+    private func paletteFill(_ category: LetterPaletteCategory) -> Color {
+        switch category {
+        case .known: return Self.paletteGreen
+        case .maybe: return Self.paletteYellow
+        case .needsPractice: return Self.paletteRed
+        case .notIntroduced: return Self.paletteRed.opacity(0.12)
+        }
+    }
+
+    private func paletteForeground(_ category: LetterPaletteCategory) -> Color {
+        switch category {
+        case .known, .needsPractice: return .white
+        case .maybe: return .ink
+        case .notIntroduced: return Self.paletteRed.opacity(0.7)
+        }
+    }
+
+    private func paletteStroke(_ category: LetterPaletteCategory) -> Color {
+        category == .notIntroduced ? Self.paletteRed.opacity(0.4) : .clear
+    }
+
+    /// Tier-1 visual alphabet. A grid of every letter colored green / yellow
+    /// / red so a parent gets the whole picture — and what's still missing —
+    /// in a single glance, before reading any numbers or scrolling the
+    /// detailed Letters list further down.
+    private var letterPaletteCard: some View {
+        let summary = letterKnowledgeSummary
+        let letters = orderedAlphabetLetters
+        let categories = letters.map { paletteCategory(for: $0, summary: summary) }
+        let knows = categories.filter { $0 == .known }.count
+        let maybe = categories.filter { $0 == .maybe }.count
+        let notYet = letters.count - knows - maybe
+        let hasUnintroduced = categories.contains(.notIntroduced)
+        let columns = [GridItem(.adaptive(minimum: 46), spacing: 8)]
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Letter map")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                Text("\(knows) / \(letters.count) known")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(Array(zip(letters, categories)), id: \.0) { letter, category in
+                    paletteTile(letter: letter, category: category)
+                }
+            }
+
+            HStack(spacing: 14) {
+                paletteLegendItem(color: Self.paletteGreen, label: "Knows", count: knows)
+                paletteLegendItem(color: Self.paletteYellow, label: "Maybe", count: maybe)
+                paletteLegendItem(color: Self.paletteRed, label: "Not yet", count: notYet)
+                Spacer(minLength: 0)
+            }
+
+            if hasUnintroduced {
+                Text("Faded red tiles are letters the app hasn't introduced yet.")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.78)))
+    }
+
+    private func paletteTile(letter: String, category: LetterPaletteCategory) -> some View {
+        let glyph = displayRoundKey(letter)
+        return Text(glyph)
+            .font(.system(size: 20, weight: .heavy, design: .rounded))
+            .foregroundColor(paletteForeground(category))
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(paletteFill(category))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(paletteStroke(category), lineWidth: 1.5)
+            )
+            .shadow(
+                color: category == .notIntroduced ? .clear : Color.ink.opacity(0.12),
+                radius: 2,
+                x: 0,
+                y: 1
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(glyph): \(category.accessibilityDescription)")
+    }
+
+    private func paletteLegendItem(color: Color, label: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(color)
+                .frame(width: 14, height: 14)
+            Text("\(count) \(label)")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.secondary)
+        }
+    }
+
     private func statCard(icon: String, color: Color, value: String, label: String) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
@@ -618,7 +770,7 @@ struct ParentDashboardView: View {
             if !reviewLetters.isEmpty {
                 rows.append(ParentAttentionItem(
                     id: "weekly-review",
-                    title: "Weekly test follow-up",
+                    title: "Progress check follow-up",
                     detail: reviewLetters.joined(separator: ", "),
                     systemImage: "checklist.checked",
                     tone: .warning
@@ -671,7 +823,7 @@ struct ParentDashboardView: View {
             if let latest = assessments.first {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Weekly test")
+                        Text("Progress check")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundColor(.secondary)
                             .textCase(.uppercase)

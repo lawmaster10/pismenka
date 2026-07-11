@@ -87,6 +87,7 @@ struct GameEngineSnapshot: Codable, Equatable {
     /// as 1 when the saved difficulty was eased, matching pre-cascade
     /// semantics.
     var governorEaseSteps: Int? = nil
+    var governorCooldownIndependentRounds: Int? = nil
     var focusTargetAttemptsThisSession: Int
     var focusTargetCorrectThisSession: Int
 

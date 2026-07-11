@@ -232,7 +232,7 @@ struct WeeklyLetterAssessment: Identifiable, Codable, Equatable {
     /// the test should *end* as soon as every audit letter resolves rather
     /// than padding the kid through filler review they don't need.
     static let adaptiveSessionFloor = 8
-    /// Hard comfort target for review/test days. Weekly tests are for small
+    /// Hard comfort target for review/test sessions. Progress checks are for small
     /// children, so breadth must yield before the session gets too long.
     static let adaptiveSessionCeiling = 40
 
@@ -493,11 +493,12 @@ struct Profile: Identifiable, Codable, Equatable {
     var dailyPracticeWinnerClaimedDay: LocalDay?
     var dailyPracticeWinnerClaimedMilestone: Int
 
-    /// Seven-day rhythm state: six introduction days, then one review/test day.
-    /// The weekly set contains letters intentionally introduced during the
-    /// current cycle so the review day can drill that week's material.
+    /// Practice-count rhythm state: after six completed 25-answer letter
+    /// sessions, the next session is a retention check. The cohort set tracks
+    /// letters intentionally introduced during that practice cycle.
     var learningCycleStartDay: LocalDay?
     var weeklyIntroducedLetters: Set<String>
+    var completedLetterSessionsInCycle: Int
     var activeWeeklyAssessment: WeeklyLetterAssessment?
     var recentWeeklyAssessments: [WeeklyLetterAssessment]
 
@@ -631,6 +632,11 @@ struct Profile: Identifiable, Codable, Equatable {
     /// promotion-only rule.
     var lastFrozenLetterOptionsPerRound: Int?
 
+    /// Independent recognition outcomes grouped by the number of choices that
+    /// were actually displayed. This measures grid skill separately from how
+    /// many alphabet letters happen to be known.
+    var gridPerformanceStats: [Int: GridPerformanceStat]
+
     static let maxNameLength = 8
     static let focusPauseCooldownDays = 7
 
@@ -736,6 +742,7 @@ struct Profile: Identifiable, Codable, Equatable {
         dailyPracticeWinnerClaimedMilestone: Int = 0,
         learningCycleStartDay: LocalDay? = nil,
         weeklyIntroducedLetters: Set<String> = [],
+        completedLetterSessionsInCycle: Int = 0,
         activeWeeklyAssessment: WeeklyLetterAssessment? = nil,
         recentWeeklyAssessments: [WeeklyLetterAssessment] = [],
         lastSessionDay: LocalDay? = nil,
@@ -755,6 +762,7 @@ struct Profile: Identifiable, Codable, Equatable {
         highestAlphabetLevelEverReached: AlphabetLevel = .novice,
         celebratedAlphabetLevels: Set<AlphabetLevel> = [.novice],
         lastFrozenLetterOptionsPerRound: Int? = nil,
+        gridPerformanceStats: [Int: GridPerformanceStat] = [:],
         parentNote: String? = nil
     ) {
         self.id = id
@@ -787,6 +795,7 @@ struct Profile: Identifiable, Codable, Equatable {
         self.dailyPracticeWinnerClaimedMilestone = dailyPracticeWinnerClaimedMilestone
         self.learningCycleStartDay = learningCycleStartDay
         self.weeklyIntroducedLetters = weeklyIntroducedLetters
+        self.completedLetterSessionsInCycle = max(0, completedLetterSessionsInCycle)
         self.activeWeeklyAssessment = activeWeeklyAssessment
         self.recentWeeklyAssessments = recentWeeklyAssessments
         self.lastSessionDay = lastSessionDay
@@ -806,6 +815,7 @@ struct Profile: Identifiable, Codable, Equatable {
         self.highestAlphabetLevelEverReached = highestAlphabetLevelEverReached
         self.celebratedAlphabetLevels = celebratedAlphabetLevels
         self.lastFrozenLetterOptionsPerRound = lastFrozenLetterOptionsPerRound
+        self.gridPerformanceStats = gridPerformanceStats
         self.parentNote = parentNote
     }
 
@@ -870,6 +880,18 @@ struct Profile: Identifiable, Codable, Equatable {
         ) ?? 0
         learningCycleStartDay = try c.decodeIfPresent(LocalDay.self, forKey: .learningCycleStartDay)
         weeklyIntroducedLetters = try c.decodeIfPresent(Set<String>.self, forKey: .weeklyIntroducedLetters) ?? []
+        if let saved = try c.decodeIfPresent(Int.self, forKey: .completedLetterSessionsInCycle) {
+            completedLetterSessionsInCycle = max(0, saved)
+        } else {
+            // The old schema did not persist historical session completion.
+            // Only today's claimed 25-answer chunks are trustworthy; neither
+            // calendar age nor number of introduced letters proves a session
+            // was actually finished.
+            completedLetterSessionsInCycle = min(
+                6,
+                dailyPracticeWinnerClaimedMilestone / 25
+            )
+        }
         activeWeeklyAssessment = try c.decodeIfPresent(WeeklyLetterAssessment.self, forKey: .activeWeeklyAssessment)
         recentWeeklyAssessments = try c.decodeIfPresent([WeeklyLetterAssessment].self, forKey: .recentWeeklyAssessments) ?? []
         lastSessionDay = try Profile.decodeLocalDay(
@@ -916,6 +938,14 @@ struct Profile: Identifiable, Codable, Equatable {
             var seed = Set<String>(letterStats.keys)
             if let focus = currentFocusLetter { seed.insert(focus) }
             introducedLetters = seed
+        }
+        // Repair profiles produced while spotlight graduation was tied to
+        // `currentFocusLetter`. The evidence is already present and strict
+        // (7/8); only the lifetime bookkeeping entry was missed.
+        for (key, stat) in letterStats {
+            if introducedLetters.contains(key), stat.isFocusGraduated {
+                everMasteredLetters.insert(key)
+            }
         }
         introducedSyllables = try c.decodeIfPresent(Set<String>.self, forKey: .introducedSyllables)
             ?? Set(syllableStats.keys).union(currentSyllableFocus.map { [$0] } ?? [])
@@ -977,6 +1007,10 @@ struct Profile: Identifiable, Codable, Equatable {
             Int.self,
             forKey: .lastFrozenLetterOptionsPerRound
         )
+        gridPerformanceStats = try c.decodeIfPresent(
+            [Int: GridPerformanceStat].self,
+            forKey: .gridPerformanceStats
+        ) ?? [:]
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -989,7 +1023,7 @@ struct Profile: Identifiable, Codable, Equatable {
         case lastNewLetterDay, cameoExposureDay, cameoExposuresToday
         case dailyPracticeDay, dailyPracticeAttempts
         case dailyPracticeWinnerClaimedDay, dailyPracticeWinnerClaimedMilestone
-        case learningCycleStartDay, weeklyIntroducedLetters
+        case learningCycleStartDay, weeklyIntroducedLetters, completedLetterSessionsInCycle
         case activeWeeklyAssessment, recentWeeklyAssessments
         case lastSessionDay
         // Legacy keys, decoded only for soft migration. Never written.
@@ -1011,6 +1045,7 @@ struct Profile: Identifiable, Codable, Equatable {
         case highestAlphabetLevelEverReached, celebratedAlphabetLevels
         case highestLevelEverReached, celebratedLevels
         case lastFrozenLetterOptionsPerRound
+        case gridPerformanceStats
     }
 
     /// Custom encoder that writes only the canonical fields. The legacy
@@ -1050,6 +1085,7 @@ struct Profile: Identifiable, Codable, Equatable {
         try c.encode(dailyPracticeWinnerClaimedMilestone, forKey: .dailyPracticeWinnerClaimedMilestone)
         try c.encodeIfPresent(learningCycleStartDay, forKey: .learningCycleStartDay)
         try c.encode(weeklyIntroducedLetters, forKey: .weeklyIntroducedLetters)
+        try c.encode(completedLetterSessionsInCycle, forKey: .completedLetterSessionsInCycle)
         try c.encodeIfPresent(activeWeeklyAssessment, forKey: .activeWeeklyAssessment)
         try c.encode(recentWeeklyAssessments, forKey: .recentWeeklyAssessments)
         try c.encodeIfPresent(lastSessionDay, forKey: .lastSessionDay)
@@ -1070,6 +1106,7 @@ struct Profile: Identifiable, Codable, Equatable {
         try c.encode(highestAlphabetLevelEverReached, forKey: .highestAlphabetLevelEverReached)
         try c.encode(celebratedAlphabetLevels, forKey: .celebratedAlphabetLevels)
         try c.encodeIfPresent(lastFrozenLetterOptionsPerRound, forKey: .lastFrozenLetterOptionsPerRound)
+        try c.encode(gridPerformanceStats, forKey: .gridPerformanceStats)
     }
 
     // MARK: - Migration helpers
@@ -1165,6 +1202,7 @@ struct Profile: Identifiable, Codable, Equatable {
             knownLetterCount: knownAlphabetLetterCount,
             strongKnownLetterCount: strongKnownAlphabetLetterCount,
             previousValue: lastFrozenLetterOptionsPerRound,
+            gridPerformance: gridPerformanceStats,
             language: language
         )
     }
@@ -1311,6 +1349,34 @@ struct Profile: Identifiable, Codable, Equatable {
             lowercaseMode: instructionalBand.allowsAutomaticLowercaseTargets ? .afterUppercaseMastery : .uppercaseOnly,
             blocked: activePausedFocusLetters()
         )
+        let now = Date()
+        let eligibleIntroduced = introducedLetters.filter {
+            LetterDifficulty.isEligibleTarget($0, language: language)
+        }
+        let dueReviews = eligibleIntroduced.filter { letter in
+            letterStats[letter]?.isReviewDue(at: now) == true
+        }.sorted { lhs, rhs in
+            let left = letterStats[lhs]?.reviewPriority(at: now) ?? 0
+            let right = letterStats[rhs]?.reviewPriority(at: now) ?? 0
+            return left == right ? lhs < rhs : left > right
+        }
+        let weakReviews = eligibleIntroduced.filter { letter in
+            guard letter != currentFocusLetter, let stat = letterStats[letter] else { return false }
+            return stat.targetAttempts > 0 && !known.contains(letter)
+        }.sorted { lhs, rhs in
+            let left = letterStats[lhs]?.reviewPriority(at: now) ?? 0
+            let right = letterStats[rhs]?.reviewPriority(at: now) ?? 0
+            return left == right ? lhs < rhs : left > right
+        }
+        let dueSet = Set(dueReviews)
+        let auditReviews = known.subtracting(dueSet).sorted { lhs, rhs in
+            let left = letterStats[lhs]
+            let right = letterStats[rhs]
+            let leftUncertainty = left?.memoryState.uncertainty ?? 1
+            let rightUncertainty = right?.memoryState.uncertainty ?? 1
+            if leftUncertainty != rightUncertainty { return leftUncertainty > rightUncertainty }
+            return (left?.lastTestedAt ?? .distantPast) < (right?.lastTestedAt ?? .distantPast)
+        }
         return ProfileLearningSnapshot(
             knownLetters: known,
             strongKnownLetters: strongKnown,
@@ -1344,6 +1410,9 @@ struct Profile: Identifiable, Codable, Equatable {
             nextFocusTarget: nextFocusTarget(letterSelection: nextSelection?.key),
             lettersByConfidence: lettersByConfidence,
             lettersByReviewPriority: lettersByReviewPriority,
+            dueReviewLetters: dueReviews,
+            weakReviewLetters: weakReviews,
+            auditReviewLetters: auditReviews,
             totalLettersInLanguage: language.letters.count
         )
     }
@@ -1597,13 +1666,12 @@ extension Profile {
     }
 
     private func adaptiveAssessmentPlanEntries() -> [WeeklyAssessmentPlanEntry] {
-        // Every letter introduced this cycle is treated as cohort regardless
-        // of mid-week strength. The whole point of the Sunday test is the
-        // *across-days* retention check; high in-session evidence on a
-        // Monday spotlight letter says nothing about whether the child
-        // still recognizes it after a week. A parent-issued reset still
-        // wins (we honor the override) — but a normally-strong weekly
-        // letter no longer skips the 4-attempt rerun.
+        // Every letter introduced during the six-session practice cycle is
+        // treated as cohort regardless of current strength. High in-session
+        // evidence on a spotlight letter says nothing about whether the child
+        // retained it across subsequent play sessions. A parent-issued reset
+        // still wins, but a normally-strong cohort letter does not skip the
+        // four-attempt retention rerun.
         let weeklyCohort = Set(weeklyIntroducedLetters.filter { letter in
             guard LetterDifficulty.isEligibleTarget(letter, language: language) else { return false }
             if case .reset = letterStats[letter]?.parentOverride { return false }

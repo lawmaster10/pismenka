@@ -147,6 +147,7 @@ struct ProfileSelectView: View {
         }
         .sheet(isPresented: $showCreateProfile) {
             CreateProfileView(
+                initialLanguage: settings.defaultGameLanguage,
                 onComplete: { _ in
                     showCreateProfile = false
                 },

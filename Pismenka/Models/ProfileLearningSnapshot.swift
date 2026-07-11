@@ -154,6 +154,15 @@ struct ProfileLearningSnapshot: Equatable {
     /// order.
     let lettersByReviewPriority: [String]
 
+    /// Introduced letters whose personalized recall date has arrived.
+    let dueReviewLetters: [String]
+
+    /// Introduced, not-currently-known letters ordered for remediation.
+    let weakReviewLetters: [String]
+
+    /// Small fallback pool for uncertainty checks when no review is due.
+    let auditReviewLetters: [String]
+
     /// Total letter count for the active language; useful when consumers want
     /// to compute "X out of N" without re-resolving the language alphabet.
     let totalLettersInLanguage: Int

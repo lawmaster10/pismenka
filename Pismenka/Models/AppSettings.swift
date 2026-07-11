@@ -125,6 +125,8 @@ class AppSettings: ObservableObject {
         static let reduceMotionEnabled = "reduceMotionEnabled"
         static let confettiEnabled = "confettiEnabled"
         static let personalizedCzechLettersEnabled = "personalizedCzechLettersEnabled"
+        static let hasCompletedFirstLaunchOnboarding = "hasCompletedFirstLaunchOnboarding"
+        static let defaultGameLanguage = "defaultGameLanguage"
         static let parentGateMethod = "parentGateMethod"
         static let remindersEnabled = "remindersEnabled"
         static let reminderHour = "reminderHour"
@@ -169,6 +171,23 @@ class AppSettings: ObservableObject {
         didSet {
             defaults.set(personalizedCzechLettersEnabled, forKey: Keys.personalizedCzechLettersEnabled)
             touch()
+        }
+    }
+
+    /// Device-local setup state. These values are intentionally not part of
+    /// the cloud settings snapshot: onboarding must be completed on each new
+    /// installation before a parent decides whether to restore a backup.
+    @Published private(set) var hasCompletedFirstLaunchOnboarding: Bool {
+        didSet {
+            defaults.set(hasCompletedFirstLaunchOnboarding, forKey: Keys.hasCompletedFirstLaunchOnboarding)
+        }
+    }
+
+    /// The language preselected when a parent creates a new child profile.
+    /// Individual profiles still persist their own learning language.
+    @Published private(set) var defaultGameLanguage: GameLanguage {
+        didSet {
+            defaults.set(defaultGameLanguage.rawValue, forKey: Keys.defaultGameLanguage)
         }
     }
 
@@ -217,6 +236,9 @@ class AppSettings: ObservableObject {
         self.reduceMotionEnabled = defaults.object(forKey: Keys.reduceMotionEnabled) as? Bool ?? false
         self.confettiEnabled = defaults.object(forKey: Keys.confettiEnabled) as? Bool ?? true
         self.personalizedCzechLettersEnabled = defaults.object(forKey: Keys.personalizedCzechLettersEnabled) as? Bool ?? false
+        self.hasCompletedFirstLaunchOnboarding = defaults.object(forKey: Keys.hasCompletedFirstLaunchOnboarding) as? Bool ?? false
+        let defaultLanguageRaw = defaults.string(forKey: Keys.defaultGameLanguage) ?? GameLanguage.czech.rawValue
+        self.defaultGameLanguage = GameLanguage(rawValue: defaultLanguageRaw)?.resolvedLanguage ?? .czech
         let gateRaw = defaults.string(forKey: Keys.parentGateMethod) ?? ParentGateMethod.swipe.rawValue
         self.parentGateMethod = ParentGateMethod(rawValue: gateRaw) ?? .swipe
         self.remindersEnabled = defaults.object(forKey: Keys.remindersEnabled) as? Bool ?? false
@@ -225,6 +247,11 @@ class AppSettings: ObservableObject {
         let lowercaseRaw = defaults.string(forKey: Keys.lowercaseMode) ?? LowercaseMode.uppercaseOnly.rawValue
         self.lowercaseMode = LowercaseMode(rawValue: lowercaseRaw) ?? .uppercaseOnly
         self.modifiedAt = defaults.object(forKey: Keys.modifiedAt) as? Date ?? .distantPast
+    }
+
+    func completeFirstLaunchOnboarding(language: GameLanguage) {
+        defaultGameLanguage = language.resolvedLanguage
+        hasCompletedFirstLaunchOnboarding = true
     }
 
     func snapshot() -> AppSettingsSnapshot {

@@ -52,6 +52,7 @@
 		1A0000C3 /* SyllableCurriculum.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D3 /* SyllableCurriculum.swift */; };
 		1A0000C4 /* WordCurriculum.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D4 /* WordCurriculum.swift */; };
 		1A0000C5 /* CurriculumAudioAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D5 /* CurriculumAudioAvailability.swift */; };
+		1A0000C6 /* AdaptiveLearningScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D6 /* AdaptiveLearningScheduler.swift */; };
 		84EC4E122F9F3BDC006CFBC3 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 84EC4E112F9F3BDC006CFBC3 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
@@ -111,6 +112,7 @@
 		1A0000D3 /* SyllableCurriculum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyllableCurriculum.swift; sourceTree = "<group>"; };
 		1A0000D4 /* WordCurriculum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordCurriculum.swift; sourceTree = "<group>"; };
 		1A0000D5 /* CurriculumAudioAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurriculumAudioAvailability.swift; sourceTree = "<group>"; };
+		1A0000D6 /* AdaptiveLearningScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveLearningScheduler.swift; sourceTree = "<group>"; };
 		84EC4E112F9F3BDC006CFBC3 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -190,6 +192,7 @@
 				1A0000D3 /* SyllableCurriculum.swift */,
 				1A0000D4 /* WordCurriculum.swift */,
 				1A0000D5 /* CurriculumAudioAvailability.swift */,
+				1A0000D6 /* AdaptiveLearningScheduler.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -430,6 +433,7 @@
 				1A0000C3 /* SyllableCurriculum.swift in Sources */,
 				1A0000C4 /* WordCurriculum.swift in Sources */,
 				1A0000C5 /* CurriculumAudioAvailability.swift in Sources */,
+				1A0000C6 /* AdaptiveLearningScheduler.swift in Sources */,
 				1A000090 /* FirebaseBackupService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -585,7 +589,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Pismenka/Pismenka.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -601,7 +605,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -623,7 +627,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Pismenka/Pismenka.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -639,7 +643,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -659,11 +663,11 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -679,11 +683,11 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

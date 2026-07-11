@@ -85,105 +85,125 @@ struct ContentView: View {
     @State private var activeGameSnapshot: GameEngineSnapshot?
     @State private var activeCalibrationSnapshot: CalibrationSnapshot?
     @State private var lastSummary: SessionSummary?
+    @State private var hasPreparedFirstLaunchState = false
 
     var body: some View {
         ZStack {
-            switch currentScreen {
-            case .profileSelect:
-                ProfileSelectView(
-                    onProfileSelected: { profile in
-                        handleProfileSelection(profile)
-                    },
-                    onPracticeSelected: { profile, letter in
-                        startPractice(for: profile, letter: letter)
-                    }
-                )
+            if !hasPreparedFirstLaunchState {
+                BrandBackground()
+                    .ignoresSafeArea()
+            } else if shouldShowFirstLaunchOnboarding {
+                FirstLaunchOnboardingView { language in
+                    settings.completeFirstLaunchOnboarding(language: language)
+                }
                 .transition(.opacity)
-
-            case .calibration:
-                if let profile = selectedProfile {
-                    CalibrationView(
-                        profile: profile,
-                        restoredSnapshot: activeCalibrationSnapshot,
-                        onComplete: {
-                            checkpointStore.clear(profileId: profile.id)
-                            activeCalibrationSnapshot = nil
-                            // Re-fetch (calibration just flipped the flag).
-                            let updated = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
-                            selectedProfile = updated
-                            startGame(for: updated)
+            } else {
+                switch currentScreen {
+                case .profileSelect:
+                    ProfileSelectView(
+                        onProfileSelected: { profile in
+                            handleProfileSelection(profile)
                         },
-                        onHome: {
-                            checkpointStore.clear(profileId: profile.id)
-                            resetNavigationState()
+                        onPracticeSelected: { profile, letter in
+                            startPractice(for: profile, letter: letter)
                         }
                     )
                     .transition(.opacity)
-                } else {
-                    navigationRecoveryView
-                }
 
-            case .game:
-                if let profile = selectedProfile, let plan = activeSessionPlan {
-                    GameView(
-                        profile: profile,
-                        plan: plan,
-                        profileManager: profileManager,
-                        restoredSnapshot: activeGameSnapshot,
-                        onExit: { summary in
-                            checkpointStore.clear(profileId: profile.id)
-                            activeGameSnapshot = nil
-                            lastSummary = summary
-                            currentScreen = .sessionEnd
-                        },
-                        onHome: {
-                            checkpointStore.clear(profileId: profile.id)
-                            resetNavigationState()
-                        },
-                        onWeeklyTestCompletedByParent: {
-                            checkpointStore.clear(profileId: profile.id)
-                            let updated = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
-                            startGame(for: updated)
-                        }
-                    )
-                    .id(
-                        plan.dayStreakCount.description
-                        + (plan.focusTarget?.storageKey ?? plan.focusLetter ?? "")
-                        + plan.activityKind.rawValue
-                        + String(describing: plan.mode)
-                        + ":\(plan.dailyPracticeKind.rawValue):\(plan.dailyGoalTarget)"
-                        + ":\(plan.dailySpotlightLetter ?? "")"
-                        + ":\(plan.dailyGoalStartCount):\(plan.dailyGoalClaimedCount)"
-                    )
-                    .transition(.move(edge: .trailing))
-                } else {
-                    navigationRecoveryView
-                }
+                case .calibration:
+                    if let profile = selectedProfile {
+                        CalibrationView(
+                            profile: profile,
+                            restoredSnapshot: activeCalibrationSnapshot,
+                            onComplete: {
+                                checkpointStore.clear(profileId: profile.id)
+                                activeCalibrationSnapshot = nil
+                                // Re-fetch (calibration just flipped the flag).
+                                let updated = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
+                                selectedProfile = updated
+                                startGame(for: updated)
+                            },
+                            onHome: {
+                                checkpointStore.clear(profileId: profile.id)
+                                resetNavigationState()
+                            }
+                        )
+                        .transition(.opacity)
+                    } else {
+                        navigationRecoveryView
+                    }
 
-            case .sessionEnd:
-                if let profile = selectedProfile, let summary = lastSummary {
-                    SessionEndView(
-                        profile: profile,
-                        summary: summary,
-                        onPlayAgain: {
-                            startGame(for: profile)
-                        },
-                        onHome: {
-                            checkpointStore.clear(profileId: profile.id)
-                            resetNavigationState()
-                        }
-                    )
-                    .transition(.scale)
-                } else {
-                    navigationRecoveryView
+                case .game:
+                    if let profile = selectedProfile, let plan = activeSessionPlan {
+                        GameView(
+                            profile: profile,
+                            plan: plan,
+                            profileManager: profileManager,
+                            restoredSnapshot: activeGameSnapshot,
+                            onExit: { summary in
+                                checkpointStore.clear(profileId: profile.id)
+                                activeGameSnapshot = nil
+                                lastSummary = summary
+                                currentScreen = .sessionEnd
+                            },
+                            onHome: {
+                                checkpointStore.clear(profileId: profile.id)
+                                resetNavigationState()
+                            },
+                            onWeeklyTestCompletedByParent: {
+                                checkpointStore.clear(profileId: profile.id)
+                                let updated = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
+                                startGame(for: updated)
+                            }
+                        )
+                        .id(
+                            plan.dayStreakCount.description
+                            + (plan.focusTarget?.storageKey ?? plan.focusLetter ?? "")
+                            + plan.activityKind.rawValue
+                            + String(describing: plan.mode)
+                            + ":\(plan.dailyPracticeKind.rawValue):\(plan.dailyGoalTarget)"
+                            + ":\(plan.dailySpotlightLetter ?? "")"
+                            + ":\(plan.dailyGoalStartCount):\(plan.dailyGoalClaimedCount)"
+                        )
+                        .transition(.move(edge: .trailing))
+                    } else {
+                        navigationRecoveryView
+                    }
+
+                case .sessionEnd:
+                    if let profile = selectedProfile, let summary = lastSummary {
+                        SessionEndView(
+                            profile: profile,
+                            summary: summary,
+                            onPlayAgain: {
+                                startGame(for: profile)
+                            },
+                            onHome: {
+                                checkpointStore.clear(profileId: profile.id)
+                                resetNavigationState()
+                            }
+                        )
+                        .transition(.scale)
+                    } else {
+                        navigationRecoveryView
+                    }
                 }
             }
         }
         .animation(.easeInOut(duration: 0.3), value: currentScreen)
-        .onAppear(perform: restoreCheckpointIfPossible)
+        .animation(.easeInOut(duration: 0.3), value: shouldShowFirstLaunchOnboarding)
+        .onAppear {
+            migrateExistingInstallationIfNeeded()
+            hasPreparedFirstLaunchState = true
+            restoreCheckpointIfPossible()
+        }
         .onChange(of: profileManager.profiles.map(\.id)) { _, _ in
             recoverIfSelectedProfileDisappeared()
         }
+    }
+
+    private var shouldShowFirstLaunchOnboarding: Bool {
+        !settings.hasCompletedFirstLaunchOnboarding
     }
 
     private var navigationRecoveryView: some View {
@@ -208,12 +228,23 @@ struct ContentView: View {
     }
 
     private func restoreCheckpointIfPossible() {
+        guard !shouldShowFirstLaunchOnboarding else { return }
         guard currentScreen == .profileSelect,
               let checkpoint = checkpointStore.checkpoint,
               let profile = profileManager.profiles.first(where: { $0.id == checkpoint.profileId }) else {
             return
         }
         restore(checkpoint: checkpoint, profile: profile)
+    }
+
+    /// Profiles predate the first-launch flow, so existing installations
+    /// should keep opening directly to profile selection after an app update.
+    private func migrateExistingInstallationIfNeeded() {
+        guard !settings.hasCompletedFirstLaunchOnboarding,
+              let existingProfile = profileManager.profiles.first else {
+            return
+        }
+        settings.completeFirstLaunchOnboarding(language: existingProfile.language)
     }
 
     private func restore(checkpoint: SessionCheckpointEnvelope, profile: Profile) {
