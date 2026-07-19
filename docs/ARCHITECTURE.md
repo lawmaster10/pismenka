@@ -14,7 +14,7 @@ iOS 17+, SwiftUI.
 
 - [What the app does](#what-the-app-does)
 - [User flow](#user-flow)
-  - [First launch](#1-first-launch--profile-creation)
+  - [First launch](#1-first-launch--onboarding-then-profile-creation)
   - [Calibration](#2-calibration-one-time-per-profile)
   - [Daily session](#3-daily-session)
   - [Daily goal, Winner button, and progress strip](#daily-goal-winner-button-and-progress-strip)
@@ -59,9 +59,10 @@ iOS 17+, SwiftUI.
 | Trait | Detail |
 |---|---|
 | Audience | Pre-readers, ages 3–5 |
+| First launch | Language choice (Czech default + spoken previews), then optional Apple/Google backup, then profile select |
 | Profiles | Up to 4, each fully independent |
-| Languages | English 🇺🇸 and Czech 🇨🇿 (per profile) |
-| Network | Not needed for gameplay or learning; optional Google/Firebase backup for parents (requires `GoogleService-Info.plist`; see Settings) |
+| Languages | English 🇺🇸 and Czech 🇨🇿 (per profile; app-level default from onboarding) |
+| Network | Not needed for gameplay or learning; optional Apple/Google Firebase backup for parents (requires `GoogleService-Info.plist`; see Settings and first-launch onboarding) |
 | Core loop | Hear a letter → pick the matching letter from a playful options grid (slabika/word loops remain dormant scaffolding) |
 | Difficulty | Self-adjusting per child and per letter, with a retention progress check after six completed 25-answer letter sessions |
 | Session length | Variable length per sitting (no fixed timer in code), paced by 5 hearts; progress persists toward and beyond a visible goal — **25** correct-answer rounds on introduction sessions (wrong taps do not advance the bar), **8–40 adaptive** rounds on progress-check sessions (hard cap `adaptiveSessionCeiling`; may end sooner once cohort evidence resolves; every answered round counts during the check) |
@@ -72,8 +73,15 @@ iOS 17+, SwiftUI.
 ## User flow
 
 ```
-ProfileSelectView
+App launch
    │
+   ├──[first launch]──▶ FirstLaunchOnboardingView
+   │                       │  (language → optional Apple/Google backup)
+   │                       ▼
+   │                    ProfileSelectView
+   │
+   └──[returning / migrated]──▶ ProfileSelectView
+                                   │
    ├──[gear + parent gate]──────────────────▶ SettingsView
    │
    ├──[hold profile → iOS context menu]
@@ -101,17 +109,22 @@ ProfileSelectView
 
 The profile card uses iOS's standard `.contextMenu` so the gesture is discoverable (long-press triggers the system menu; choosing an action plays a light haptic). A small hint line — `Tap a card to play · Hold for parent options.` — appears below the profile grid once at least one profile exists, so parents can find it without a tutorial. Both context menu actions still pass through `ParentGateView` before the dashboard or edit sheet opens.
 
-Root navigation lives in [`PismenkaApp.swift`](Pismenka/PismenkaApp.swift) as a four-screen state machine: `profileSelect → calibration → game → sessionEnd`.
+Root navigation lives in [`PismenkaApp.swift`](Pismenka/PismenkaApp.swift). Before the four-screen state machine (`profileSelect → calibration → game → sessionEnd`), `ContentView` gates on `AppSettings.hasCompletedFirstLaunchOnboarding`: when false, it shows [`FirstLaunchOnboardingView`](Pismenka/Views/Profile/CreateProfileView.swift) (defined in the same file as `CreateProfileView`). Installs that already have a profile skip the onboarding via `migrateExistingInstallationIfNeeded`, which calls `completeFirstLaunchOnboarding(language:)` with the first existing profile's language so updates keep opening on profile select.
 
-### 1. First launch — profile creation
+### 1. First launch — onboarding, then profile creation
 
-`ProfileSelectView` shows the existing profile cards, up to the four-profile limit, plus a bottom `+` button. When no profiles exist yet, a first-run card explains how to add a child and points parents to the gear icon for settings, backup, and recovery. Tapping `+` triggers the configured parent gate (`ParentGateView`) before `CreateProfileView` opens. The default gate is a swipe-up drag; settings can switch it to a hold-two-buttons accessibility mode.
+**App-level onboarding (`FirstLaunchOnboardingView`).** On a truly new install the parent sees a two-step welcome before any profile exists:
+
+1. **Language** — Czech is selected by default; English is the other choice. Each option has a spoken letter preview ("Hear A"). Continue advances to backup.
+2. **Optional backup** — Sign in with Apple or Google when Firebase is configured, or skip. Copy states that play works without an account and that progress can be lost without backup. Completing (or skipping) calls `AppSettings.completeFirstLaunchOnboarding(language:)`, which stores `defaultGameLanguage` and sets `hasCompletedFirstLaunchOnboarding = true`, then the root navigates to `ProfileSelectView`.
+
+**Profile creation.** `ProfileSelectView` shows the existing profile cards, up to the four-profile limit, plus a bottom `+` button. When no profiles exist yet, a first-run card explains how to add a child and points parents to the gear icon for settings, backup, and recovery. Tapping `+` triggers the configured parent gate (`ParentGateView`) before `CreateProfileView` opens (seeded with `settings.defaultGameLanguage` from onboarding). The default gate is a swipe-up drag; settings can switch it to a hold-two-buttons accessibility mode.
 
 In `CreateProfileView` the parent picks:
 
 - **Avatar** — emoji picker drives the profile's color theme. Avatars already used by another profile are hidden (`ProfileManager.availableAvatars()`).
 - **Name** — optional; empty name falls back to the avatar's display name. When set, limited to 8 characters; ASCII keyboard, autocorrect off (so "Lulu" doesn't become "Lulu's"). Create is enabled once an avatar is chosen (name not required).
-- **Language** — English or Czech. Sets the alphabet and bundled audio prefix for that profile.
+- **Language** — English or Czech (pre-selected from the app-level default). Sets the alphabet and bundled audio prefix for that profile; each child can still differ from the onboarding choice.
 
 The level **is not** chosen — the app discovers it during calibration. There's no "novice/beginner/expert" question for the parent.
 
@@ -124,7 +137,7 @@ Tapping **Create** saves the profile and dismisses the sheet; the child is **not
 - Each pool letter is scheduled to appear exactly twice; with a name-letter addition the schedule grows from 20 to 22 rounds. A soft "no two consecutive same" pass varies the cadence.
 - Each round records a real `targetAttempts` / `targetCorrect` event; nothing is synthetically pre-marked.
 - Distractor selection during calibration avoids visually confusing pairs by filtering `LetterDifficulty.visuallyConfusingPairs` in `CalibrationView.buildOptions` (same intent as `ConfusionPolicy.avoid`, but calibration does not call the enum).
-- Calibration can stop after 10-12 rounds when confidence is already clear or fatigue appears; mixed evidence continues to the full 20-22.
+- Calibration can stop early via `CalibrationView.shouldStopCalibrationEarly`: after ≥10 rounds when accuracy is ≥0.8 or ≤0.3; after any stretch of ≥3 wrong in the last 5; or after ≥12 rounds when accuracy is ≥0.75 or ≤0.4. Mixed evidence continues to the full 20-22.
 - When the child finishes the finale screen and taps through, `CalibrationView` calls `ProfileManager.markCalibrationComplete` (sets `hasCompletedCalibration = true`); `ContentView`'s completion handler then routes into `GameView`. Leaving via the home control before that does not set the flag (it clears the calibration checkpoint but keeps any `LetterStat` data already written by answered rounds).
 
 **Calibration screens.** `CalibrationView` shows a welcome intro, then letter rounds with checkpoint persistence (including cold-launch restore via `ContentView.restoreCheckpointIfPossible`), then a short finale. Only the finale button marks calibration complete and hands off to the daily game.
@@ -148,7 +161,7 @@ A session is structured into phases by [`AdaptiveGameState`](Pismenka/Models/Gam
 | Phase | Trigger | Round shape |
 |---|---|---|
 | `warmup` | Letter sessions only, when the engine starts in warm-up | Target chosen from known letters ordered by review priority; distractors are other known letters. Warm-up deliberately excludes the active focus/spotlight, so a just-introduced letter is not hidden among warm-up distractors before drill begins. Warm-up uses `ConfusionPolicy.avoid`. Reading-layer routing is dormant in this release (`primaryLayer` stays `.letters`), so only letter sessions use a non-zero planner warm-up. |
-| `drill` | Letter sessions after warm-up, while either a durable focus or daily spotlight is active | Mostly the active drill focus as target (with progressive scaffolding); the focus/spotlight also slips in as a "clearly wrong" distractor for extra exposure. Durable remediation focus wins when the child is stuck; otherwise the daily spotlight becomes the active drill focus without clearing `currentFocusLetter`. Product goal for a completed 25-round introduction session: the introduced spotlight appears at least three times and is asked as a target at least once (`testIntroducedSpotlightAppearsDuringDailyLetterSession`); drill forcing (`firstFocusAppearanceDeadline`, `activeDrillFocus`) is designed toward that exposure. |
+| `drill` | Letter sessions after warm-up, while either a durable focus or daily spotlight is active | The active drill focus is the priority target (by teaching-mode probability, with progressive scaffolding, never chained, capped at 10 asks per local day); remaining rounds go to the needs-work / confusion-partner / strong mix described in [Introduction-day round mix](#daily-goal-winner-button-and-progress-strip). The focus/spotlight also slips in as a "clearly wrong" distractor for extra exposure. Durable remediation focus wins when the child is stuck; otherwise the daily spotlight becomes the active drill focus without clearing `currentFocusLetter`. Product goal for a completed 25-round introduction session: the introduced spotlight appears at least three times and is asked as a target at least once (`testIntroducedSpotlightAppearsDuringDailyLetterSession`); drill forcing (`firstFocusAppearanceDeadline`, `activeDrillFocus`) is designed toward that exposure. |
 | `plainReview` | Letter sessions when no drill focus is active, including no-focus review and retention progress checks | Normal review pulls from known letters, weak/stale letters, and confidence-ordered pools. Progress checks first prioritize the frozen assessment cohort until every cohort letter has enough independent evidence, then fall back to weak/stale/global review. The frozen `instructionalBand` gates similar-shape, mixed-case, and visual-only distractors while cameo eligibility follows its own conservative rules. Progress checks use safer confusable rules than later Expert maintenance and do not inject contrast rounds. |
 | `maintenance` | Alphabet Expert, no current letter focus | Mixed letter review ordered by `reviewPriority`, with deliberate confusable-pair, mixed-case practice, and eligible cameo letters. Reading stage does not decide letter maintenance by itself. |
 | `contrast` | ~1 in 5 eligible review/maintenance round builds (`Int.random(in: 1...5) == 1` per build, not a global quota) | Target is a letter the child often confuses, with the confused letter deliberately shown as a distractor. |
@@ -159,7 +172,7 @@ A session is structured into phases by [`AdaptiveGameState`](Pismenka/Models/Gam
 | `wordReading` *(dormant)* | Czech word layer after enough known slabiky | Target is a seeded word such as `MÁMA`; options are eligible words with matching syllable shape where possible. |
 | `wordBuilding` *(dormant)* | Scheduled word-production activity | Uses two-syllable tiles and `expectedSequence` / `selectedSequence` in `LearningRound` when invoked. |
 
-Letter sessions use a session-frozen 4/6/8 answer grid from `Profile.letterOptionsPerRound`, based on current known-letter and strong-known-letter counts, not directly on the alphabet-level badge. See [Answer-grid sizing: 4 / 6 / 8 options](#answer-grid-sizing-4--6--8-options) for the exact contract. `instructionalBand` still gates the harder distractor/case behavior, but it no longer directly decides the answer count. `LiveDifficulty` can downshift the frozen grid during struggle. Early slabika and word sessions are designed to stay at 4 choices even when the child is already Expert in letters, but they are not reachable in the current release.
+Letter sessions use a session-frozen 4/6/8 answer grid from `Profile.letterOptionsPerRound`, based on known/strong-known pool safety **plus** demonstrated independent performance at the current grid size (`Profile.gridPerformanceStats`), not on the alphabet-level badge. Per-round, `AdaptiveGameState.resolvedLetterOptionCount` can still cap a weak, new, slipped, or active-drill-focus target at 4 (or 6 for strong-but-not-fluent) even after a wider session grid is earned. See [Answer-grid sizing: 4 / 6 / 8 options](#answer-grid-sizing-4--6--8-options) for the exact contract. `instructionalBand` still gates the harder distractor/case behavior, but it no longer directly decides the answer count. `LiveDifficulty` can downshift the frozen grid during struggle. Early slabika and word sessions are designed to stay at 4 choices even when the child is already Expert in letters, but they are not reachable in the current release.
 
 #### Daily goal, Winner button, and progress strip
 
@@ -182,6 +195,8 @@ On ordinary introduction sessions, only **correct** answers advance the visible 
 
 `dailyGoalStartCount` comes from `Profile.dailyPracticeCount(on:)`, so a child can get 10 correct in the morning, run out of hearts, come back later, and see `10 / 25` already filled. Hearts end the **current sitting** only; they do not reset or fail the daily goal.
 
+**Introduction-day round mix.** Within the 25-answer day, `chooseIntroductionDrillTarget` fills non-warm-up rounds in this priority order: (1) the spotlight/focus by teaching-mode probability, never chained back-to-back when alternatives exist; (2) an active confusion partner of the previous target (~35% when a pair like B/D has live mistake evidence), so discriminations get adjacent-round practice; (3) a **needs-work** letter — introduced letters that are weak on recent accuracy, under-practiced (< 5 target attempts), **review-due per the memory scheduler** (`LetterMemoryState`), or still short of strong evidence (never cleared `isStrongKnown` / graduation / lifetime mastery — the parent letter map's "Maybe" tiles), weighted-sampled by a blend of weakness, low attempts, and forgetting risk so the day interleaves the pool instead of drilling the top two; (4) an occasional **strong** letter (~15% base, ~22% when live session accuracy is under 70%, ~30% under 55%), ordered by scheduler `reviewPriority` so the easy win lands on the strong letter closest to slipping. Every letter is hard-capped at **10 target asks per local day** (`hardMaxTargetsPerLetterPerSession`, seeded across sittings from `Profile.dailyTargetAskCounts`), with a sparse-profile escape when nothing else is eligible.
+
 After the first target is reached, the counter keeps going instead of stopping at `25 / 25` or the frozen review/test target. The visible count switches to extra rounds: `+1`, `+5`, `+25`, and so on. Tapping the Winner button records the highest completed milestone for that local day in `dailyPracticeWinnerClaimedMilestone`. On the next same-day session, Winner stays hidden until the child completes another full goal chunk: after claiming `25`, the next Winner appears at `+25` (`50` total); after claiming an adaptive review/test goal, the next Winner appears after one more full goal chunk.
 
 When the visible goal is reached, adaptive play swaps the progress strip for the `🏆 WINNER 🏆` bar (`Tap for your prize`) until the child claims the milestone; after a claim, the strip returns while extra-round chunks accumulate toward the next Winner. Claiming each ordinary 25-answer chunk increments the persisted six-session cycle. The Winner tap is intentionally a larger celebration than ordinary correct-answer feedback: full-screen celebration confetti (`.celebration`), a big `WOW!`, then applause via `AudioService.playWinnerCelebration` before handing off to `SessionEndView`. During a progress check, claiming Winner at the frozen goal also finalizes the assessment if needed.
@@ -197,7 +212,7 @@ The `GameView` card header and bottom progress strip show the contract visually 
 Only **correct** adaptive-daily **target** rounds advance `Profile.dailyPracticeAttempts` on ordinary days. This is explicit at the persistence boundary via `countsTowardDailyPractice` combined with the round's `wasCorrect` (and the weekly-test exception below):
 
 - Counts: correct ordinary target rounds, correct rescue/assisted target rounds, and correct revealed target rounds, when they came from the adaptive daily game flow.
-- Weekly-test exception: on review/test days (detected by a present `activeWeeklyAssessment`, committed before the first answer), **every** answered target round counts — wrong answers included — because the test is a fixed-length audit, not a correct-answer quota.
+- Progress-check exception: on review/test days (detected by a present `activeWeeklyAssessment`, committed before the first answer), **every** answered target round counts — wrong answers included — because the check is a coverage audit with an adaptive 8–40 participation target (and may end early once every planned letter has a non-pending outcome), not a correct-answer quota.
 - Does not count: on ordinary days, any wrong answer (including deliberate wrong taps and impulsive misses); and always: distractor exposure, cameo exposure, visual-only distractors, parent-directed extra practice, opening a preview, or any non-adaptive flow that does not pass the daily counter flag.
 - Mastery remains stricter than daily participation. Assisted rounds may advance the visible daily bar while still being discounted from `recentResults` / `targetAttempts` where appropriate.
 
@@ -229,6 +244,7 @@ The state lives on `Profile`:
 |---|---|
 | `dailyPracticeDay`, `dailyPracticeAttempts` | Local-day counter behind the visible 25/adaptive progress bar and extra-round display. |
 | `dailyPracticeWinnerClaimedDay`, `dailyPracticeWinnerClaimedMilestone` | Local-day Winner claim receipt; prevents same-day Winner from reappearing until the next full goal chunk is complete. |
+| `dailyTargetAskDay`, `dailyTargetAskCounts` | Per-letter target-ask counts for the current local day; seeds each new sitting's engine counts so the 10-ask-per-letter introduction-day cap holds per calendar day. |
 | `learningCycleStartDay` | Informational start date for the current practice-count cycle; it does not trigger the check. |
 | `weeklyIntroducedLetters` | Letters introduced as spotlights during this six-session cycle (legacy field name retained for storage compatibility). |
 | `completedLetterSessionsInCycle` | Number of claimed 25-answer letter sessions in the current cycle, capped at six. |
@@ -323,7 +339,7 @@ This is what a parent sees in the time it takes to glance during a snack: identi
 
 - **Header card** — avatar, `Alphabet: <level>` with badge, inline `info.circle` button that opens the glossary alert, day-streak chip (`flame.fill` plus `N-day streak`, or `No streak yet` for empty streaks), best-streak chip when it differs from current, and a `Best level:` row when the lifetime-best alphabet level is higher than the current one. The reading-stage chip described in older specs is not rendered in the current build because the reading layer is dormant. In `DEBUG` builds, long-pressing the header reveals the `AdaptiveDebugOverlay`.
 - **Try this today (`recommendationCard`)** — one short recommendation line chosen from recent impulses, confusions, slow-but-correct letters, or the child's name. (The Czech CV readiness recommendation path lives in the dormant reading layer and is not exercised in the current release.)
-- **Needs attention** — at-a-glance rows for letters or patterns that need follow-up: current needs-practice letters, recently slipped letters, weekly-test watch/review outcomes, and common confusions. Drawn from the same snapshot, weekly-assessment, and round-event fields the dashboard already uses everywhere else.
+- **Needs attention** — at-a-glance rows for letters or patterns that need follow-up: current needs-practice letters, recently slipped letters, progress-check watch/review outcomes, and common confusions. Drawn from the same snapshot, weekly-assessment, and round-event fields the dashboard already uses everywhere else.
 - **Today's focus card** — the current focus letter, the day count of practice, and a one-sentence explanation of why the engine picked it. (The card is typed to render slabiky/words as well; only letters surface today.)
 - **Progress at a glance (`progressGlanceCard`)** — the four-bucket headline used by both the profile cards and the dashboard, in a single rich card:
   - Headline `<confidentlyKnown> / <totalLetters> confidently known` with a green linear progress bar.
@@ -366,7 +382,7 @@ Everything raw is collapsed into a single expander so it never crowds the top of
 
 #### Overflow menu, glossary, and notes
 
-The toolbar's `ellipsis.circle` button opens a confirmation dialog with profile-level actions, in this order: **Edit profile** (dismisses the dashboard sheet, then opens edit), **Sound settings**, **Add parent note** or **Edit parent note**, **What do labels mean?**, **Undo last reset** (when available), **Skip current weekly test** (only for an unfinished `activeWeeklyAssessment`), **Re-run calibration**, **Pick a new focus letter** (when active), **Reset day streak** (only when `dailyStreakCount > 0` or `lastSessionDay` is set), then **Cancel**. The same skip is available in-game during `.reviewTest`: long-press the replay button → parent gate → `skipActiveWeeklyAssessment` → `practiceComplete` summary → `startGame` again (no `SessionEndView`). Granular resets also appear on per-letter action dialogs (see [Granular resets](#granular-resets)).
+The toolbar's `ellipsis.circle` button opens a confirmation dialog with profile-level actions, in this order: **Edit profile** (dismisses the dashboard sheet, then opens edit), **Sound settings**, **Add parent note** or **Edit parent note**, **What do labels mean?**, **Undo last reset** (when available), **Skip current progress check** (only for an unfinished `activeWeeklyAssessment`), **Re-run calibration**, **Pick a new focus letter** (when active), **Reset day streak** (only when `dailyStreakCount > 0` or `lastSessionDay` is set), then **Cancel**. The confirm alert title matches that label; its primary button still says **Skip test**. The same skip is available in-game during `.reviewTest`: long-press the replay button → parent gate → `skipActiveWeeklyAssessment` → `practiceComplete` summary → `startGame` again (no `SessionEndView`). Granular resets also appear on per-letter action dialogs (see [Granular resets](#granular-resets)).
 
 The glossary is the single source of truth for parent-facing taxonomy and is reused everywhere a label appears. It documents both the four headline buckets (`Confidently known`, `Likely known`, `Needs practice`, `Not introduced`) and the per-letter knowledge states (`Needs help`, `Getting there`, `Recently slipped`, `Practicing now`, `Confident`, `Mastered`, plus the two override states). The header's inline `info.circle` and the ellipsis menu's `What do labels mean?` both open the same alert text, so a parent never has to guess how the summary tiles relate to the per-letter rows.
 
@@ -389,6 +405,8 @@ The glossary is the single source of truth for parent-facing taxonomy and is reu
 | `recentResponseTimes` | Rolling target-attempt timings (cap 10); ≥4 samples required for `isFluentKnown`. |
 | `wasKnownBefore` / `demotedAt` | Set on known→not-known demotion; feed `recentlySlipped` and parent summary. |
 | `confusedWith` / `impulsiveSelections` | Mistake maps (confusion vs impulse); dashboard / contrast policy. |
+| `memoryState: LetterMemoryState` | FSRS-inspired per-letter memory model (difficulty, stability, lapses, predicted retrievability, next due review). Drives `reviewPriority` / `isReviewDue`, which feed warm-up ordering, the introduction-day needs-work pool, and maintenance review. Migrated automatically from legacy attempt counts on first decode. |
+| `confusionEvidence: [String: LetterConfusionEvidence]` | Pair-level confusion tracking keyed by displayed distractor — opportunities, mistakes, and recent clean discriminations, so old mix-ups can retire. Its `isActive` gate drives contrast rounds and the introduction-day confusion-partner interleave. |
 | `promptReplayCount` | Speaker replays while letter was target (dashboard hint). |
 | `parentNote` | Parent-only note; not used by adaptive engine. |
 
@@ -465,9 +483,9 @@ Alphabet levels use `Profile.everMasteredLetters`, a monotonic `Set` so a letter
 | Alphabet level | Requirement | Grid / case relationship | Confusion / case behavior | Badge |
 |---|---:|---|---|---|
 | Novice | 0–9 mastered letters | Usually 4 options; the live grid is still computed from known/strong-known evidence, not the trophy alone. | Gentle: similar-shape distractors avoided. | 🌱 |
-| Beginner | 10–14 mastered letters | Trophy tier only; 6 options require the separate known-letter grid gate. | Safe fluent-known pairs: similar letters allowed only when both sides are accurate and quick. | 🌟 |
-| Intermediate | 15–19 mastered letters | Often the first tier where the 6-option gate can be satisfied (`known ≥ 15`, `strong ≥ 10`). | Same as Beginner, with a larger known pool. | 🚀 |
-| Advanced | 20+ but not all letters | Does not automatically mean 8 options; 8 requires about 85% of the active alphabet known plus a strong-known pool. | Intentional similar-shape practice; lowercase distractors and visual-only lookalikes can appear when fluent evidence allows them. | 🏆 |
+| Beginner | 10–14 mastered letters | Trophy tier only; 6 options also require the separate known/strong pool gate **and** grid-performance promotion evidence. | Safe fluent-known pairs: similar letters allowed only when both sides are accurate and quick. | 🌟 |
+| Intermediate | 15–19 mastered letters | Often the first tier where the 6-option *pool-safety* gate can be satisfied (`known ≥ 15`, `strong ≥ 10`); promotion still needs `gridPerformance[4]` evidence. | Same as Beginner, with a larger known pool. | 🚀 |
+| Advanced | 20+ but not all letters | Does not automatically mean 8 options; 8 requires about 85% of the active alphabet known, a strong-known pool, **and** `gridPerformance[6]` promotion evidence. | Intentional similar-shape practice; lowercase distractors and visual-only lookalikes can appear when fluent evidence allows them. | 🏆 |
 | Expert | All letters in language | Usually keeps the widest earned letter grid; stays in letter maintenance in the current release. | Whole-alphabet crown and mixed-case review. Stays in letter maintenance in the current release (the Czech reading layer is dormant). | 👑 |
 
 Reading stages (dormant; the reading layer never unlocks in the current build) use `syllablesUnlockedAt`, `everMasteredSyllables`, and `everMasteredWords`:
@@ -486,45 +504,47 @@ Two alphabet fields plus two engine-only difficulty signals are tracked:
 
 - **`alphabetLevel`** — parent-facing alphabet progress derived from `everMasteredLetters`; monotonic during normal play, but drops when `resetAllProgress` clears `everMasteredLetters`.
 - **`instructionalBand`** — derived when building `Profile.snapshot` from `strongKnownLetters ∩ everMasteredLetters`. It gates confusable-distractor policy, automatic lowercase targets/distractors, and visual-only distractors, and can sit below `alphabetLevel` after recent slips.
-- **`letterOptionsPerRound`** — computed on `Profile` via `AlphabetLevel.letterOptionsPerRound(...)` from known/strong counts and hysteresis; not persisted. Promotes at known ≥ 15 / strong ≥ 10 (6-grid) and known ≥ `max(20, ceil(0.85 * alphabetCount))` / strong ≥ threshold − 3 (8-grid).
-- **`lastFrozenLetterOptionsPerRound`** — persisted previous session grid for ±2 **known-count-only** demotion hysteresis (strong-known can fall below the promotion gate while the grid stays widened). `ProfileManager.recordSessionFrozenGrid` writes it from `AdaptiveGameState` init. Survives `resetAllProgress` today, so hysteresis can carry over after a full wipe unless cleared separately.
+- **`letterOptionsPerRound`** — computed on `Profile` via `AlphabetLevel.letterOptionsPerRound(...)` from known/strong **pool-safety** counts, `gridPerformanceStats` promotion evidence, and between-session hysteresis; not persisted. Pool-safety promotes at known ≥ 15 / strong ≥ 10 (6-grid) and known ≥ `max(20, ceil(0.85 * alphabetCount))` / strong ≥ threshold − 3 (8-grid), but only after the current tier's `GridPerformanceStat.supportsPromotion` passes.
+- **`gridPerformanceStats`** — persisted `[Int: GridPerformanceStat]` keyed by displayed option count (4 / 6 / 8). Updated on independent (non-assisted, non-impulse) adaptive-daily target attempts in `ProfileManager.recordAnswer` when the displayed count is 4, 6, or 8. Measures visual-search skill separately from alphabet knowledge.
+- **`lastFrozenLetterOptionsPerRound`** — persisted previous session grid for demotion hysteresis (known **and** strong within 2 of the promotion thresholds, plus `supportsMaintenance` on the held grid size). `ProfileManager.recordSessionFrozenGrid` writes it from `AdaptiveGameState` init. Survives `resetAllProgress` today, as does `gridPerformanceStats`, so hysteresis/performance evidence can carry over after a full wipe unless cleared separately.
 - **`highestAlphabetLevelEverReached`** — monotonic alphabet trophy; never decreases, never reset by `resetAllProgress`. Surfaces in the dashboard as `Best:` whenever it diverges from the current alphabet level.
 
-An alphabet level-up celebration fires **at most once per profile per alphabet level**. The receipt is `Profile.celebratedAlphabetLevels: Set<AlphabetLevel>` — durable across sessions, preserved through resets, indifferent to any future demotion path. New profiles default with `.novice` already celebrated (`AlphabetLevel.threshold(.novice)` is 5 mastered letters, but the first popup parents usually see is crossing into **Beginner** at 10).
+An alphabet level-up celebration fires **at most once per profile per alphabet level**. The receipt is `Profile.celebratedAlphabetLevels: Set<AlphabetLevel>` — durable across sessions, preserved through resets, indifferent to any future demotion path. New profiles default with `.novice` already celebrated so the first popup parents usually see is crossing into **Beginner** at 10 mastered letters (`AlphabetLevel.threshold(.beginner)`). (`threshold(.novice)` is 5 in code, but `from(letterMasteredCount:)` already returns `.novice` for 0–9, so that threshold is not a separate promotion step.)
 
 The alphabet table is also the progression contract the tests check directly, but the engine splits difficulty-sensitive behavior: the frozen letter-grid size comes from `Profile.letterOptionsPerRound`, while the frozen `instructionalBand` controls confusable-distractor policy, automatic lowercase targets/distractors, and visual-only distractors. Dashboard badges and level-up celebrations keep reading `alphabetLevel` / `highestAlphabetLevelEverReached`; the reading-stage chip from older specs is not shown while the reading layer is dormant.
 
 ### Answer-grid sizing: 4 / 6 / 8 options
 
-The answer-grid size is deliberately **not tied directly to `alphabetLevel`**. A child can be Beginner, Intermediate, Advanced, or Expert for trophy/dashboard purposes while the live grid is still decided by current known-letter evidence. The product behavior is:
+The answer-grid size is deliberately **not tied directly to `alphabetLevel`**. A child can be Beginner, Intermediate, Advanced, or Expert for trophy/dashboard purposes while the live grid is still decided by current known-letter **pool safety** plus demonstrated independent performance at the current grid size. The product behavior is:
 
 ```
 newer / less certain profile  -> 4 options
-more known + strong evidence  -> 6 options
-near-whole alphabet evidence  -> 8 options
+pool safety + strong 4-grid performance  -> 6 options
+near-whole alphabet safety + strong 6-grid performance  -> 8 options
 ```
 
-The live resolver is `Profile.letterOptionsPerRound`, implemented by `AlphabetLevel.letterOptionsPerRound(...)`. It uses two alphabet-scoped counts:
+The live resolver is `Profile.letterOptionsPerRound`, implemented by `AlphabetLevel.letterOptionsPerRound(...)`. It uses two alphabet-scoped counts plus `Profile.gridPerformanceStats`:
 
 - `knownAlphabetLetterCount` — letters in `Profile.knownLetters`, which come from `LetterStat.effectiveIsKnown` (normally at least 80% over the last 5 target attempts with a 2-attempt minimum, plus parent `.markedKnown`; parent `.reset` removes the letter). The current focus letter is excluded until it graduates unless the parent explicitly marked it known.
 - `strongKnownAlphabetLetterCount` — letters in `Profile.strongKnownLetters`, which require at least 4 target attempts, at least 80% recent accuracy, and `EvidenceStrength >= .solid`. Parent `.markedKnown` does not synthesize strong evidence.
+- `gridPerformanceStats[optionCount]` — `GridPerformanceStat` for independent outcomes recorded while that many choices were on screen (rolling window of 20). Promotion needs enough trials, recent accuracy ≥ 0.85, and Wilson lower bound ≥ 0.70.
 
-Promotion thresholds:
+Pool-safety thresholds (necessary but not sufficient alone):
 
-| Grid | Required evidence |
-|---:|---|
-| 4 options | Default while the wider-grid gates are not satisfied. |
-| 6 options | `knownAlphabetLetterCount >= 15` **and** `strongKnownAlphabetLetterCount >= 10`. |
-| 8 options | `knownAlphabetLetterCount >= max(20, ceil(0.85 * alphabetCount))` **and** `strongKnownAlphabetLetterCount >= thatThreshold - 3`. English (26 letters) means 23 known / 20 strong. Czech (41 letters) means 35 known / 32 strong. |
+| Grid | Required pool safety | Required performance evidence |
+|---:|---|---|
+| 4 options | Default while wider gates are not satisfied. | — |
+| 6 options | `knownAlphabetLetterCount >= 15` **and** `strongKnownAlphabetLetterCount >= 10`. | `gridPerformance[4]?.supportsPromotion(minimumTrials: 12)` |
+| 8 options | `knownAlphabetLetterCount >= max(20, ceil(0.85 * alphabetCount))` **and** `strongKnownAlphabetLetterCount >= thatThreshold - 3`. English (26 letters) means 23 known / 20 strong. Czech (41 letters) means 35 known / 32 strong. | `gridPerformance[6]?.supportsPromotion(minimumTrials: 16)` |
 
 Session behavior:
 
-- The base grid is frozen at `GameView` / `AdaptiveGameState` init as `frozenLetterOptionsPerRound`, so a letter becoming known or slipping during a session does not resize the grid mid-run.
-- `Profile.lastFrozenLetterOptionsPerRound` stores the previous session's frozen grid. Demotion hysteresis only checks `knownLetterCount` (within two of the promotion threshold); `strongKnownAlphabetLetterCount` is not part of the hysteresis band, so a widened grid can persist after strong-known evidence slips.
+- The base grid is frozen at `GameView` / `AdaptiveGameState` init as `frozenLetterOptionsPerRound`, so a letter becoming known or slipping during a session does not resize the session baseline mid-run.
+- Per round, `resolvedLetterOptionCount(for:profile:)` can still narrow the displayed count below that baseline: unknown / not-yet-known / recently-slipped / active-drill-focus targets stay at **4**; strong-but-not-fluent targets cap at **6**; fluent-known targets may use the full frozen grid. Progress-check audit buckets also force smaller grids (cohort/slipped/emerging/parentMarked → 4; solid → 6).
+- `Profile.lastFrozenLetterOptionsPerRound` stores the previous session's frozen grid. Demotion hysteresis checks known **and** strong within 2 of the promotion thresholds **and** `gridPerformance[heldSize]?.supportsMaintenance` (recent ≥6 of last ≤8 samples at ≥75% accuracy; defaults to held while evidence is thin). Profiles that already had a 6/8 grid keep a continuity window until enough outcomes exist to demote on recent failure.
 - `instructionalBand` is separate. It gates similar-shape distractors, lowercase behavior, and visual-only lookalikes; it does not directly choose 4 vs 6 vs 8.
-- `LiveDifficulty == .easierUntilStreak` downshifts the displayed grid by **2 options per step** (`governorEaseSteps`, max 2: 8→6→4). Recovery requires **2 consecutive correct** answers while eased, then steps back one tier at a time until `liveDifficulty` returns to `.normal`.
+- `LiveDifficulty == .easierUntilStreak` downshifts the displayed grid by **2 options per step** (`governorEaseSteps`, max 2: 8→6→4). Recovery requires **≥4 correct in the last 5 independent rounds** while the current eased `optionCount` is consistent with the step count, then steps back one tier at a time until `liveDifficulty` returns to `.normal` (a 3-round cooldown then blocks sticky re-trips from hearts-low / focus-accuracy latches).
 - Reading-layer slabika/word sessions are designed to stay at 4 options, but that layer is dormant in the current release.
-
 ### Daily spotlight, durable focus & scaffolding ladder
 
 In the letter layer, the game now separates **daily variety** from **long-lived remediation**:
@@ -742,7 +762,7 @@ This lets the app shield struggling kids early and deliberately train discrimina
 
 ### Round generation & answer-position fairness
 
-Letter rounds show the session's frozen `letterOptionsPerRound`: 4 options by default, 6 once the known-letter and strong-known pools are large enough, and 8 once the child has about 85% of the active alphabet known with enough strong evidence. That grid size is persisted as `Profile.lastFrozenLetterOptionsPerRound` so the next session can apply ±2 demotion hysteresis instead of flickering after one slipped letter. Reading-layer sessions intentionally stay at 4 choices because the early slabika/word curricula and unlock gates are built around a 1+3 option shape. When `LiveDifficulty == .easierUntilStreak`, each `governorEaseSteps` value downshifts the displayed grid by **2 options** (max 2 steps: 8→6→4), floored at 4; rescue rounds follow the same eased count. Naive shuffling produces patterns toddlers exploit (correct answer always top-left, etc.). `AdaptiveGameState.placeAnswer(target:distractors:isFocusTarget:)` enforces:
+Letter rounds show a session-frozen baseline `letterOptionsPerRound` (4 by default; 6/8 after pool-safety **and** grid-performance promotion), then may narrow per target via `resolvedLetterOptionCount`. That baseline is persisted as `Profile.lastFrozenLetterOptionsPerRound` so the next session can apply demotion hysteresis (known + strong within 2 of the promotion thresholds, plus `supportsMaintenance`) instead of flickering after one slipped letter. Reading-layer sessions intentionally stay at 4 choices because the early slabika/word curricula and unlock gates are built around a 1+3 option shape. When `LiveDifficulty == .easierUntilStreak`, each `governorEaseSteps` value downshifts the displayed grid by **2 options** (max 2 steps: 8→6→4), floored at 4; rescue rounds follow the same eased count. Naive shuffling produces patterns toddlers exploit (correct answer always top-left, etc.). `AdaptiveGameState.placeAnswer(target:distractors:isFocusTarget:)` enforces:
 
 - **No more than two correct answers in the same slot consecutively.** `recentCorrectPositions` keeps the last two positions and forbids a third repeat in that slot.
 - **Even distribution across the session.** `sessionCorrectPositionCounts: [Int]` — preference rotates toward the least-used slot when ties allow.
@@ -768,7 +788,8 @@ Progress-check sessions are intentionally routed through `plainReview`, even for
 - `learningLetters`, `unseenLetters`, `recentlySlipped` — dashboard and picker support pools.
 - `unseenSyllables`, `unseenWords` — curriculum-derived unseen pools.
 - `lettersByConfidence` — Wilson-only certainty ordering for parent display and easy distractors. No response-time discount: slow correct answers are still correct, and the right place to reward fluency is the additive `isFluentKnown` tier, not a subtractive penalty here.
-- `lettersByReviewPriority` — warm-up/maintenance target ordering: `0.6*weakness + 0.4*staleness`. Slowness used to be a third 0.2 term but was removed — for a distractible 3-year-old, "slow on this letter" is mostly distraction noise rather than weakness, and drilling a known-but-slow letter at the expense of an actually-weak letter wasted practice time.
+- `lettersByReviewPriority` — warm-up/maintenance target ordering by `LetterStat.reviewPriority`, which delegates to the FSRS-inspired `AdaptiveLearningScheduler.priority`: recall risk (predicted retrievability below the 90% retention target) + recent weakness + lapse pressure + evidence uncertainty + overdueness + explicit follow-ups. Slowness is deliberately not a term — for a distractible 3-year-old, "slow on this letter" is mostly distraction noise rather than weakness, and drilling a known-but-slow letter at the expense of an actually-weak letter wasted practice time.
+- `dueReviewLetters`, `weakReviewLetters`, `auditReviewLetters` — scheduler pools: introduced letters whose personalized review date has arrived (priority-ordered), introduced-but-not-currently-known letters ordered for remediation, and a small uncertainty-first audit pool of known letters used when nothing is due.
 - `instructionalBand` — engine distractor/case band derived from `strongKnownLetters ∩ everMasteredLetters`; reading mastery does not raise this letter-session band in the current code.
 - `currentFocusTarget`, `nextFocusTarget` — typed focus state at the API edge, currently populated only for letters while the reading layer is dormant. The method signature still carries the future word-audio hook, but the current implementation returns a letter target or `nil` rather than synthesizing syllable/word previews.
 - `nextFocusCandidate` — letter-only preview retained for existing consumers; it is populated from the same prerequisite-aware letter picker used for focus selection.
@@ -846,6 +867,7 @@ The contract is documented inline on `ProfileManager.buildSessionPlan` (`preview
 | Reading unlock | **May be stamped mid-session** on Czech alphabet completion (`syllablesUnlockedAt`), but `buildSessionPlan` clears reading unlock/focus fields each session start and only schedules letters today; onboarding/calibration would start no earlier than the next eligible calendar day if reading were re-enabled |
 | Daily spotlight / new focus unit | **At most one formal introduction per calendar day** (graduation also consumes the day's quota); spotlight introduction does not wipe an unrelated durable focus |
 | Daily goal count | **Persists across same-day sessions** through `dailyPracticeDay` / `dailyPracticeAttempts` | **Introduction days:** only **correct** adaptive-daily **target** rounds advance it. **Review/test days:** every answered **target** round advances it (correct or incorrect) while `activeWeeklyAssessment` is set. |
+| Per-letter target asks | **Accumulate across same-day sessions** through `dailyTargetAskDay` / `dailyTargetAskCounts`; each new sitting seeds `AdaptiveGameState.sessionTargetCounts` from them (merged per-letter-max with any restored checkpoint), so the introduction-day 10-ask cap holds per calendar day |
 | Weekly assessment | **Persists across same-day review/test sessions** through `activeWeeklyAssessment`; a naturally completed assessment remains active until the next local day, while a parent-skipped assessment is archived immediately and clears the way for a same-day introduction session |
 | Day streak | **Unchanged** on same-day re-entry |
 | `focusActiveDays` | **Unchanged** — `Set<LocalDay>` insertion is idempotent |
@@ -858,7 +880,7 @@ Net effect: a child can play 1 / 3 / 10 sessions on a single day, keep accruing 
 
 Mistakes no longer end adaptive daily or weekly review/test sessions by themselves. The child keeps playing until they tap Winner, leave with Home, or lose all hearts. Older checkpoints that contain the legacy `tiredSignal` value are ignored on restore when hearts remain, so a stale saved session cannot immediately jump to the summary screen.
 
-Struggle still adapts the next rounds. The session difficulty governor trips when the child gets 3 of the last 4 wrong, drops to 2 hearts or fewer, or shows low focus accuracy after the session is underway. While eased, the app avoids confusing distractors, halves focus-target pressure, downshifts the displayed grid by 2 options per governor step (max 2 steps), restricts `pickFiltered` to known tiers only, and drains rescue retries sooner. Two consecutive correct answers walk the governor back one tier at a time until normal difficulty is restored.
+Struggle still adapts the next rounds. The session difficulty governor trips when the child gets 3 of the last 4 wrong, drops to 2 hearts or fewer, or shows low focus accuracy after the session is underway. While eased, the app avoids confusing distractors, halves focus-target pressure, downshifts the displayed grid by 2 options per governor step (max 2 steps), restricts `pickFiltered` to known tiers only, and drains rescue retries sooner. Recovery requires **≥4 correct in the last 5 independent rounds** (with the eased `optionCount` matching the current step), then walks the governor back one tier at a time until normal difficulty is restored; a short cooldown then prevents sticky latch re-trips.
 
 A trip (or a deepening of an existing ease while already eased) only ever fires on a **wrong** answer — a correct answer never makes the grid harder. This matters because `heartsLow` (hearts only fall within a session) and `focusAccuracyLow` (a slow cumulative average) are sticky latches: without the wrong-answer guard, the round right after a streak recovery would re-trip purely from the stale latch and the option grid would flicker back down (e.g. 6 → 4) even on a correct answer. The next genuine miss re-trips if the child is still struggling.
 
@@ -872,7 +894,7 @@ The app records both aggregate learning stats and a local rolling round narrativ
 - `confusedWith` for real confusions and `impulsiveSelections` for instant taps
 - `promptReplayCount`, `recentResponseTimes`, `medianResponseTime`, `responseTimeBucket`. Response-time recording uses an **asymmetric speed rule** — see [Asymmetric speed rule](#asymmetric-speed-rule) below.
 - `wasKnownBefore` and `demotedAt` for recently slipped letters
-- `reviewPriority` for stale/weak review ordering. `LetterStat` uses `0.6*weakness + 0.4*staleness`; dormant reading `UnitProgressStat` currently uses `0.7*weakness + 0.3*staleness`. Neither uses a slowness term.
+- `reviewPriority` for stale/weak review ordering. `LetterStat` delegates to the FSRS-inspired `AdaptiveLearningScheduler.priority` (recall risk + weakness + lapse pressure + uncertainty + overdueness + follow-ups); dormant reading `UnitProgressStat` still uses the simpler `0.7*weakness + 0.3*staleness`. Neither uses a slowness term.
 - `EvidenceStrength` (`notEnoughData`, `emerging`, `solid`, `strong`) so the parent dashboard does not overtrust 1/1 = 100%
 
 #### Asymmetric speed rule
@@ -887,10 +909,10 @@ A 3-year-old's response time is asymmetric evidence: a single slow tap could be 
 
 The net effect: a distractible child who knows their letters is no longer silently penalized for the natural attention drift of their age, and the parent-facing "Confidently known" headline no longer fluctuates because of toddler latency noise. The previous design discovered the problem the hard way: a child at 91% lifetime accuracy across 779 attempts showed only 11/41 letters as confidently known, primarily because slow-but-correct answers were being treated as evidence-against rather than evidence-for.
 
-`WeeklyLetterAssessment` is a separate persisted diagnostic snapshot for the Sunday adaptive review/test. It deliberately does not try to infer retention later from aggregate `LetterStat`, because aggregate stats mix calibration, ordinary drill, rescue, cameos, and historical attempts. The assessment stores:
+`WeeklyLetterAssessment` is a separate persisted diagnostic snapshot for the six-session retention progress check. It deliberately does not try to infer retention later from aggregate `LetterStat`, because aggregate stats mix calibration, ordinary drill, rescue, cameos, and historical attempts. The assessment stores:
 
-- `scheduledFor` — the Sunday date the test was due.
-- `startedOn` — the local day the child actually started it, which may be Sunday or the next played day.
+- `scheduledFor` — the local day the check was planned for (normally the same day the child starts it after six completed 25-answer sessions).
+- `startedOn` — the local day the child actually started it (usually the same as `scheduledFor`).
 - `cohortLetters` — the frozen ordered audit set.
 - `strategy`, `assessmentRoundTarget`, `dailyGoalTarget`, `hardRoundCap` — legacy-vs-adaptive shape and frozen progress/cap numbers.
 - `results` — one `WeeklyAssessmentLetterResult` per audit letter, each with bucket, planned attempts, extension allowance, independent attempts, independent correct count, and response-time samples.
@@ -914,9 +936,9 @@ For letter sessions, `FocusTeachingMode` is the game-side strategy switch for du
 
 Paused focus letters are skipped for 7 local days via `pausedFocusLetterDays`, or until a parent reset/override reopens that letter. After the cooldown, the letter can re-enter the picker if its prerequisites and recent confusion signals make it a safe candidate again.
 
-Repetition is intentionally tuned down compared with the older focus-heavy loop. Focus-target chance is lower in scaffolded/normal modes, recent target letters are remembered so the same symbol is less likely to appear immediately again, and ordinary rescue retries are spaced by at least one round when possible. Daily spotlight adds visible variety, while the six-session progress check gives a structured retention checkpoint without clearing durable remediation pressure.
+Repetition is intentionally tuned down compared with the older focus-heavy loop. Focus-target chance is lower in scaffolded/normal modes, recent target letters are remembered so the same symbol is less likely to appear immediately again, needs-work targets are weighted-sampled rather than always taking the top-scored letter, no letter may be the target more than 10 times per local day on introduction days (persisted across sittings), and ordinary rescue retries are spaced by at least one round when possible. Daily spotlight adds visible variety, while the six-session progress check gives a structured retention checkpoint without clearing durable remediation pressure.
 
-Audio feedback also participates in the model. Replaying the prompt increments `promptReplayCount`. Tap replays the current target prompt at normal speed. On weekly review/test days, a two-second long-press on the replay button opens the parent gate so a parent can skip/end the active weekly test early (same archive semantics as **Skip current weekly test** in the dashboard). `AudioService.playLetterSlow(..., rate: 0.7)` exists for future tuning but is not wired in the current UI. On a second miss of the same letter in one session, the correct tile enters a reveal state, pulses, and replays the target prompt before the next round.
+Audio feedback also participates in the model. Replaying the prompt increments `promptReplayCount`. Tap replays the current target prompt at normal speed. On progress-check (`.reviewTest`) days, a two-second long-press on the replay button opens the parent gate so a parent can skip/end the active progress check early (same archive semantics as **Skip current progress check** in the dashboard). `AudioService.playLetterSlow(..., rate: 0.7)` exists for future tuning but is not wired in the current UI. On a second miss of the same letter in one session, the correct tile enters a reveal state, pulses, and replays the target prompt before the next round.
 
 ---
 
@@ -942,11 +964,11 @@ The picker still exposes **Lowercase after uppercase** and **Mixed case after bo
 - Opening the parent dashboard (**View results** on a held profile card)
 - Opening profile edit (**Edit profile** on a held profile card)
 - Opening **Settings** from the profile-select gear icon
-- Skipping an unfinished weekly review/test **from inside the game** (two-second long-press on the replay button during a weekly test session → gate → `skipActiveWeeklyAssessment`, then `commitSessionStartIfNeeded`, `endSession`, checkpoint clear, and immediate `startGame` — no `SessionEndView`)
+- Skipping an unfinished progress check **from inside the game** (two-second long-press on the replay button during a `.reviewTest` session → gate → `skipActiveWeeklyAssessment`, then `commitSessionStartIfNeeded`, `endSession`, checkpoint clear, and immediate `startGame` — no `SessionEndView`)
 
 Profile-card parent actions use iOS `.contextMenu` (long-press → **View results** / **Edit profile**); the gate runs after the menu choice, not on hold alone.
 
-**Not** re-gated behind `ParentGateView` once you are already in the parent dashboard: **Sound settings**, granular resets, weekly-test skip (confirmation alert only), backup/export, and per-letter actions. Those assume the adult already passed the gate to reach `ParentDashboardView`.
+**Not** re-gated behind `ParentGateView` once you are already in the parent dashboard: **Sound settings**, granular resets, progress-check skip (confirmation alert only), backup/export, and per-letter actions. Those assume the adult already passed the gate to reach `ParentDashboardView`.
 
 Reset/delete profile and full progress reset live in `EditProfileView`, reachable only after the edit-profile gate on the profile card.
 
@@ -987,9 +1009,9 @@ Five reset operations on `ProfileManager`, smallest blast radius first. Each is 
 | `resetCurrentFocus` | `currentFocusLetter`, `currentSyllableFocus`, `currentWordFocus`, `focusStartedDay`, `focusPracticedDays`, `lastFocusSelection` | Letter/syllable/word stats, `lastNewLetterDay`, streak |
 | `resetLetterStats(letter:)` | One letter's `LetterStat` (counters, timestamps, override); removes it from `everMasteredLetters`, `introducedLetters`, and paused-focus cooldown state; clears focus if it **was** the focus; clears `lastFocusSelection` if it described that letter | Other letters, streak, calibration, lifetime trophy fields |
 | `resetStreak` | `dailyStreakCount`, `lastSessionDay` | `bestDailyStreak`, all learning stats, focus |
-| `resetAllProgress` | All learning history across letters/slabiky/words, calibration, unlock flags, focus, weekly assessment state/history, streak, mastery sets, introduced sets, paused-focus state, focus-selection reason, raw round events, plus `bestSessionStreak`, daily-practice day/counters/winner flags, `weeklyIntroducedLetters`, `learningCycleStartDay`, and reading-layer scaffold flags | Avatar, name, language, and profile-level `parentNote`; `bestDailyStreak`, `highestAlphabetLevelEverReached`, `celebratedAlphabetLevels` (lifetime trophies); `lastFrozenLetterOptionsPerRound` is **not** cleared |
+| `resetAllProgress` | All learning history across letters/slabiky/words, calibration, unlock flags, focus, weekly assessment state/history, streak, mastery sets, introduced sets, paused-focus state, focus-selection reason, raw round events, plus `bestSessionStreak`, daily-practice day/counters/winner flags, `dailyTargetAskDay` / `dailyTargetAskCounts`, `weeklyIntroducedLetters`, `learningCycleStartDay`, `completedLetterSessionsInCycle`, and reading-layer scaffold flags | Avatar, name, language, and profile-level `parentNote`; `bestDailyStreak`, `highestAlphabetLevelEverReached`, `celebratedAlphabetLevels` (lifetime trophies); `lastFrozenLetterOptionsPerRound` and `gridPerformanceStats` are **not** cleared |
 
-`skipActiveWeeklyAssessment` is separate from the five resets: it archives the in-progress weekly test, clears the active cycle, and may reset daily-practice counters so a same-day introduction can run (dashboard alert, no second gate).
+`skipActiveWeeklyAssessment` is separate from the five resets: it archives the in-progress progress check, clears the active cycle, and may reset daily-practice counters so a same-day introduction can run (dashboard alert, no second gate).
 
 `ProfileManager` stores `lastResetSnapshot` before each of the five reset APIs **and** before `deleteProfile`, enabling a single **Undo last reset** step on the dashboard. Undo restores the snapshotted profile JSON (re-appending a deleted profile when under the four-profile cap) but does **not** restore cleared `SessionCheckpointStore` envelopes. Dashboard confirmations call `checkpointStore.clear(profileId:)` so resume checkpoints do not disagree with wiped state.
 
@@ -1009,12 +1031,13 @@ UI surfacing:
 
 ```
 Pismenka/
-├── PismenkaApp.swift              `PismenkaApp` entry, `PismenkaAppDelegate` (Firebase bootstrap), and `ContentView` four-screen state machine with checkpoint resume
+├── PismenkaApp.swift              `PismenkaApp` entry, `PismenkaAppDelegate` (Firebase bootstrap), and `ContentView` first-launch gate + four-screen state machine with checkpoint resume
 ├── Models/
-│   ├── Profile.swift              Per-child profile (letter/syllable/word stats, weekly assessments, focus, streaks, trophies)
+│   ├── Profile.swift              Per-child profile (letter/syllable/word stats, weekly assessments, focus, streaks, trophies, `gridPerformanceStats`)
 │   ├── ProfileLearningSnapshot.swift  Single source of truth for derived learning state
 │   ├── LearningUnit.swift         UnitKind, FocusTarget, LearningActivityKind, LearningRound
 │   ├── LetterStat.swift           Per-letter mastery + LetterOverride + LetterKnowledgeState
+│   ├── AdaptiveLearningScheduler.swift  FSRS-inspired memory model: LetterMemoryState (difficulty, stability, retrievability, due dates), review priority, pair-level LetterConfusionEvidence, GridPerformanceStat
 │   ├── UnitProgressStat.swift     Shared syllable/word mastery aggregate (dormant in current release)
 │   ├── LetterSymbol.swift         Typed API-edge wrapper for base/form/language
 │   ├── FocusSelectionReason.swift Persisted "why this focus?" explanation
@@ -1023,10 +1046,10 @@ Pismenka/
 │   ├── SyllableCurriculum.swift   Czech CV slabika DAG + syllable distractors (dormant)
 │   ├── WordCurriculum.swift       Czech seed words + playable word-pool gates (dormant)
 │   ├── CurriculumAudioAvailability.swift  Model-layer protocol for audio-backed curriculum gating
-│   ├── SkillLevel.swift           AlphabetLevel + ReadingStage (reading stages dormant), Comparable, trophy support
-│   ├── LocalDay.swift             Calendar-day value type (year/month/day, daysSince, today(), nextSunday)
-│   ├── GameState.swift            `SessionPlan`, `AdaptiveGameState` — phases, typed rounds, daily goals, weekly assessment targeting, spotlight drill, hearts, stamps, distractors, position fairness
-│   ├── AppSettings.swift          Audio, comfort, reminders, case-practice, parent-gate, personalized-Czech-letters settings
+│   ├── SkillLevel.swift           AlphabetLevel + ReadingStage (reading stages dormant), Comparable, trophy support, `letterOptionsPerRound` pool-safety + grid-performance gates
+│   ├── LocalDay.swift             Calendar-day value type (year/month/day, daysSince, today(); `nextSunday` exists but is unused by the live six-session planner)
+│   ├── GameState.swift            `SessionPlan`, `AdaptiveGameState` — phases, typed rounds, daily goals, progress-check targeting, spotlight drill, hearts, stamps, distractors, position fairness, governor
+│   ├── AppSettings.swift          Audio, comfort, reminders, case-practice, parent-gate, personalized-Czech-letters, first-launch onboarding (`hasCompletedFirstLaunchOnboarding`, `defaultGameLanguage`)
 │   └── SessionCheckpoint.swift    Versioned exact-resume checkpoints
 ├── Services/
 │   ├── ProfileManager.swift       Profile CRUD; session lifecycle; six-session progress-check planner; assessment scoring; recordAnswer; overrides; granular resets. `buildSessionPlan` leaves `primaryLayer` at `.letters` and clears reading-unlock fields on every commit.
@@ -1035,14 +1058,14 @@ Pismenka/
 │   ├── SessionCheckpointStore.swift  Local resume-checkpoint persistence
 │   ├── NotificationService.swift  Parent opt-in local reminder (7:00 AM local time)
 │   ├── ProfileExportService.swift Versioned JSON backup import/export
-│   └── FirebaseBackupService.swift Google sign-in + Firestore recovery mirror
+│   └── FirebaseBackupService.swift Sign in with Apple + Google + Firestore recovery mirror
 ├── Resources/
 │   └── RoutingCoverage.geojson    Marketing/availability map; not consumed by app gameplay
 ├── Views/
 │   ├── Profile/
 │   │   ├── ProfileSelectView.swift
 │   │   ├── ParentGateView.swift   Parent gate: swipe-up or accessible hold-buttons mode
-│   │   ├── CreateProfileView.swift
+│   │   ├── CreateProfileView.swift  Also defines `FirstLaunchOnboardingView` (language + optional backup)
 │   │   └── EditProfileView.swift  Avatar + name editing, Reset progress, Delete profile (parent-gated). No reading-practice toggle in the current shipping UI.
 │   ├── Game/
 │   │   ├── CalibrationView.swift  One-time calibration: early stop ~10–12 when evidence is clear; otherwise up to 20–22 rounds (pool ×2)
@@ -1053,7 +1076,7 @@ Pismenka/
 │   ├── Settings/
 │   │   └── SettingsView.swift     Music toggle, voice-and-sounds (SFX) toggle, Personalized letters (Čermák), Reduce motion, Confetti, Parent gate, Case practice, Daily reminder, Audio check, Export/Import backup, cloud recovery, Copy diagnostic summary. Also defines `AudioCheckView`, which exposes only the first four language letters as `Replay "Find X"` plus the replayable game SFX clips (`Correct`, `Wrong`, `Streak 5`, `Streak 10`, `Click`).
 │   ├── Parent/
-│   │   └── ParentDashboardView.swift  Three-tier parent dashboard: Tier 1 (header/recommendation/needs-attention/focus/progress-glance + the green/yellow/red letter-map palette over the full alphabet), Tier 2 (weekly test summary, sortable+filterable letters list, reading progress — the reading-progress section is dormant), Tier 3 (collapsible diagnostics for retention/test rounds/confusions/raw history). Glossary alert + ellipsis menu for overrides, granular resets, weekly-test skip.
+│   │   └── ParentDashboardView.swift  Three-tier parent dashboard: Tier 1 (header/recommendation/needs-attention/focus/progress-glance + the green/yellow/red letter-map palette over the full alphabet), Tier 2 (progress-check summary, sortable+filterable letters list, reading progress — the reading-progress section is dormant), Tier 3 (collapsible diagnostics for retention/test rounds/confusions/raw history). Glossary alert + ellipsis menu for overrides, granular resets, progress-check skip.
 │   └── Components/
 │       ├── ConfettiView.swift
 │       ├── DesignSystem.swift     Brand colors, typography, button styles, `BrandBackground`
@@ -1062,6 +1085,8 @@ Pismenka/
 ├── Sounds/                        See "Required assets → Audio" for the full layout
 ├── Pismenka.entitlements          Sign in with Apple and other target capabilities
 └── Info.plist
+
+website/                           Separate Astro static marketing site (pismenka.com: home, privacy, support) deployed to Cloudflare Pages; not part of the iOS learning engine
 ```
 
 Three file-naming quirks worth knowing about (kept this way to avoid churning the Xcode project file):
@@ -1069,6 +1094,7 @@ Three file-naming quirks worth knowing about (kept this way to avoid churning th
 - `EasyModeGrid.swift` defines `LetterGrid`, not an `EasyModeGrid` type.
 - `SummaryView.swift` defines `SessionEndView`, not a `SummaryView` type.
 - `Settings/SettingsView.swift` also contains `AudioCheckView`, `PersonalizedLettersCodeSheet`, and the shared `BrandPrimaryButtonStyle` / `BrandSecondaryButtonStyle` — they were intentionally kept in the same file to colocate the parent-area UI.
+- `CreateProfileView.swift` also contains `FirstLaunchOnboardingView` (app-level language + optional backup before profile select).
 
 ---
 
@@ -1094,6 +1120,7 @@ Each `Profile` carries:
 | `cameoExposureDay`, `cameoExposuresToday` | `LocalDay?`, `Int` | Per-local-day budget for intentional cameo distractor exposures |
 | `dailyPracticeDay`, `dailyPracticeAttempts` | `LocalDay?`, `Int` | Visible daily progress counter; backs `dailyGoalStartCount` and persists 25/adaptive progress across same-day sessions |
 | `dailyPracticeWinnerClaimedDay`, `dailyPracticeWinnerClaimedMilestone` | `LocalDay?`, `Int` | Same-day Winner receipt; hides the Winner button until another full goal chunk is completed |
+| `dailyTargetAskDay`, `dailyTargetAskCounts` | `LocalDay?`, `[String: Int]` | Per-letter target asks for the current local day; makes the introduction-day 10-ask cap hold across sittings |
 | `learningCycleStartDay`, `weeklyIntroducedLetters` | `LocalDay?`, `Set<String>` | Informational cycle start and spotlight cohort retained under legacy storage names |
 | `completedLetterSessionsInCycle` | `Int` | Claimed 25-answer letter sessions in the current cycle; the next session becomes a progress check at six |
 | `activeWeeklyAssessment` | `WeeklyLetterAssessment?` | Current frozen review/test audit and per-letter retained/watch/review evidence. Completed same-day assessments remain here until the next local day. |
@@ -1114,6 +1141,7 @@ Each `Profile` carries:
 | `highestAlphabetLevelEverReached` | `AlphabetLevel` | Monotonic alphabet trophy |
 | `celebratedAlphabetLevels` | `Set<AlphabetLevel>` | Receipts — guarantees one alphabet level-up celebration per alphabet level per profile |
 | `lastFrozenLetterOptionsPerRound` | `Int?` | Last session's frozen 4/6/8 letter-grid size; gives the next session a hysteresis baseline so one slipped letter does not immediately shrink the grid. |
+| `gridPerformanceStats` | `[Int: GridPerformanceStat]` | Independent recognition outcomes keyed by displayed option count (4 / 6 / 8). Feeds promotion and maintenance in `AlphabetLevel.letterOptionsPerRound`; updated on independent adaptive-daily target attempts. |
 | `hasCompletedCalibration` | `Bool` | Routes to letter calibration on first launch |
 | `hasCompletedSyllableOnboarding`, `hasCompletedSyllableCalibration`, `hasCompletedWordOnboarding`, `hasCompletedWordCalibration` | `Bool` | Reading-layer intro/calibration receipts |
 | `parentNote` | `String?` | Free-form parent note attached to the profile. Informational only; never feeds the adaptive model. (`LetterStat` has its own per-letter `parentNote` with the same contract.) |
@@ -1125,7 +1153,8 @@ Hardening migrations are intentionally additive; no on-disk schema bump is requi
 - `LetterStat` / `UnitProgressStat` evidence-tier additions are computed properties, so no stored profile field or schema bump is required.
 - `AttemptContext`, `cameoLetter`, `includedFocusAsDistractor`, and `planReason` are optional/default-valued `RoundEvent` additions. Missing `attemptContext` remains stored as `nil`, and consumers semantically default it to independent practice with `attemptContext ?? .independent`; missing cameo/focus fields read as no cameo / no focus-distractor flag.
 - `Profile.dailyPracticeDay`, `dailyPracticeAttempts`, `learningCycleStartDay`, and `weeklyIntroducedLetters` default to nil/zero/empty on old profiles. They start participating the next time a daily plan is committed.
-- `Profile.activeWeeklyAssessment` defaults to nil and `recentWeeklyAssessments` defaults to empty on old profiles. New review/test assessment history begins with the first committed Sunday-or-next-played review/test after this code runs; old aggregate `LetterStat` history is not backfilled into fake retained/watch/review verdicts.
+- `Profile.activeWeeklyAssessment` defaults to nil and `recentWeeklyAssessments` defaults to empty on old profiles. New progress-check assessment history begins with the first committed six-session review/test after this code runs; old aggregate `LetterStat` history is not backfilled into fake retained/watch/review verdicts.
+- `Profile.gridPerformanceStats` defaults to empty on older profiles; until enough independent outcomes exist at the current grid size, promotion stays at 4 options even when known/strong pool-safety thresholds are met. Existing 6/8-grid profiles keep a continuity window via `lastFrozenLetterOptionsPerRound` + `supportsMaintenance` until demotion evidence appears.
 - `SessionPlan.dailyGoalTarget`, `dailyGoalStartCount`, `dailyPracticeKind`, `weeklyReviewLetters`, `dailySpotlightLetter`, and `dailyGoalClaimedCount` all have decode defaults so older checkpoints or tests that lack the new fields still load. Older plans default to a 25-round introduction day with zero starting progress and no spotlight.
 - `readingPracticePaused` reads legacy `postExpertPracticePaused` payloads; new saves write the broader reading-practice name.
 - `pausedFocusLetters` defaults to empty on older profiles, and legacy paused letters get a migration-time `pausedFocusLetterDays` value for the 7-day cooldown.
@@ -1264,9 +1293,9 @@ Credential setup:
 Before each release:
 
 ```bash
-# Example: public version 1.2, build 1. Update both Debug and Release app/test
+# Example: public version 1.4, build 1. Update both Debug and Release app/test
 # MARKETING_VERSION / CURRENT_PROJECT_VERSION values in project.pbxproj.
-VERSION=1.2
+VERSION=1.4
 BUILD=1
 KEY_ID=<KEY_ID>
 ISSUER_ID=<ISSUER_ID>
@@ -1512,7 +1541,7 @@ service cloud.firestore {
 - **Third-party cloud** — Firebase Auth + Firestore and Google Sign-In provide recovery without Apple iCloud entitlements. Firebase Analytics / Crashlytics are not integrated.
 - **iOS 17.0+ runtime; Xcode 16+ to build.** The project sets `IPHONEOS_DEPLOYMENT_TARGET = 17.0`; minimum Xcode is documented in `README.md`, not in `project.pbxproj`.
 - **Hardening trade-offs.** Conservative gates can make the app feel one session behind sudden improvement, but they avoid promoting unsupported distractors, unplayable reading units, or assisted attempts into mastery evidence.
-- **Deferred follow-ups.** Longitudinal retention decay beyond the weekly assessment snapshot, richer rhyme/first-sound/clap-syllables mini-games, parent voice packs/name recording, optional tracing UI, micro-phrases, font policy, and physically blocking input for the first 300-400 ms after options appear are intentionally outside the current hardening contract.
+- **Deferred follow-ups.** Longitudinal retention decay beyond the progress-check assessment snapshot, richer rhyme/first-sound/clap-syllables mini-games, parent voice packs/name recording, optional tracing UI, micro-phrases, font policy, and physically blocking input for the first 300-400 ms after options appear are intentionally outside the current hardening contract.
 
 ## License
 

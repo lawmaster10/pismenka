@@ -685,7 +685,7 @@ struct FirebaseBackupStatusRow: View {
         case .notConfigured:
             return "Add GoogleService-Info.plist from Firebase to enable cloud recovery."
         case .signedOut:
-            return "Sign in to back up progress and restore it after reinstall."
+            return "Without backup, progress can be lost after delete or a new phone. Sign-in is only for backup."
         case .syncing:
             return "Syncing cloud backup."
         case .synced(let date):

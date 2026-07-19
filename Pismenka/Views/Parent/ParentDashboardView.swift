@@ -284,7 +284,7 @@ struct ParentDashboardView: View {
                 secondaryButton: .cancel()
             )
         case .currentFocus:
-            let focusName = live.currentFocusLetter ?? "—"
+            let focusName = live.currentFocusLetter ?? "-"
             return Alert(
                 title: Text("Drop focus letter \(focusName)?"),
                 message: Text("\(focusName) stops being \(live.displayName)'s active practice letter. Past attempts, trophies, and notes are kept. A new focus can be picked on the next eligible day."),
@@ -799,7 +799,7 @@ struct ParentDashboardView: View {
     }
 
     private func letterPracticeAccuracyText(_ summary: LetterPracticeSummary) -> String {
-        guard summary.targetAttempts > 0 else { return "—" }
+        guard summary.targetAttempts > 0 else { return "-" }
         return "\(Int((summary.accuracy * 100).rounded()))%"
     }
 
@@ -1190,7 +1190,7 @@ struct ParentDashboardView: View {
     }
 
     private func percentageText(_ value: Double) -> String {
-        guard value.isFinite else { return "—" }
+        guard value.isFinite else { return "-" }
         return "\(Int((value * 100).rounded()))%"
     }
 
@@ -1243,7 +1243,7 @@ struct ParentDashboardView: View {
                     RoundedRectangle(cornerRadius: 14)
                         .fill(live.colorTheme.opacity(0.2))
                         .frame(width: 64, height: 64)
-                    Text(snapshot.currentFocusTarget?.displayText ?? snapshot.currentFocus.map { live.displayText(for: $0) } ?? "—")
+                    Text(snapshot.currentFocusTarget?.displayText ?? snapshot.currentFocus.map { live.displayText(for: $0) } ?? "-")
                         .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundColor(live.colorTheme)
                 }
@@ -1310,9 +1310,9 @@ struct ParentDashboardView: View {
                 return "All letters mastered. The session is now pure letter review."
             }
             if let next = snapshot.nextFocusCandidate {
-                return "No focus right now — \(next) is up next session."
+                return "No focus right now. \(next) is up next session."
             }
-            return "No focus right now — a new one will be picked next session."
+            return "No focus right now. A new one will be picked next session."
         }
         let strongLetters = snapshot.lettersByConfidence
             .prefix(4)
@@ -1321,7 +1321,7 @@ struct ParentDashboardView: View {
             return focusReasonText(reason.reason, focus: focus, strongLetters: Array(strongLetters))
         }
         if strongLetters.isEmpty {
-            return "We're starting with \(focus) — first new letter for \(live.displayName)."
+            return "We're starting with \(focus), the first new letter for \(live.displayName)."
         }
         let strongList = strongLetters.joined(separator: ", ")
         return "Chose \(focus) because \(strongList) are already strong."
@@ -1774,13 +1774,13 @@ struct ParentDashboardView: View {
     private var glossaryText: String {
         """
         PROGRESS BUCKETS (top counts)
-        • Confidently known — letter has cleared a strict bar at least once \
+        • Confidently known: letter has cleared a strict bar at least once \
         (Wilson 95% on lifetime accuracy, or 7/8 of recent attempts, or \
         previously mastered) AND is still answered reliably right now.
-        • Likely known — currently passes the loose 4/5 recent check, or was \
+        • Likely known: currently passes the loose 4/5 recent check, or was \
         previously mastered but has wobbled in the last few attempts.
-        • Needs practice — introduced and has never reliably cleared the bar.
-        • Not introduced — not yet intentionally taught.
+        • Needs practice: introduced and has never reliably cleared the bar.
+        • Not introduced: not yet intentionally taught.
 
         SPEED IS ASYMMETRIC
         A fast tap is strong positive evidence; a slow tap is no evidence \
@@ -1788,14 +1788,14 @@ struct ParentDashboardView: View {
         certainty or push letters into "needs practice".
 
         PER-LETTER STATE (Letters list)
-        • Mastered — lifetime mastery, ≥ 7/8 of recent target attempts.
-        • Confident — currently passes the looser known rule.
-        • Getting there — recent accuracy ≥ 50% but not yet known.
-        • Needs help — recent accuracy below 50%.
-        • Recently slipped — was mastered, now failing recent checks.
-        • Practicing now — today's focus letter.
-        • Marked known / Reset by parent — your manual overrides.
-        • Not seen yet — never encountered as target or distractor.
+        • Mastered: lifetime mastery, ≥ 7/8 of recent target attempts.
+        • Confident: currently passes the looser known rule.
+        • Getting there: recent accuracy ≥ 50% but not yet known.
+        • Needs help: recent accuracy below 50%.
+        • Recently slipped: was mastered, now failing recent checks.
+        • Practicing now: today's focus letter.
+        • Marked known / Reset by parent: your manual overrides.
+        • Not seen yet: never encountered as target or distractor.
         """
     }
 
@@ -2161,12 +2161,12 @@ struct LetterStatRow: View {
     }
 
     private var percentText: String {
-        guard stat.targetAttempts > 0 else { return "—" }
+        guard stat.targetAttempts > 0 else { return "-" }
         return "\(Int((stat.accuracy * 100).rounded()))%"
     }
 
     private var certaintyText: String {
-        guard stat.targetAttempts > 0 else { return "Certainty —" }
+        guard stat.targetAttempts > 0 else { return "Certainty: -" }
         return "Certainty \(Int((stat.certaintyScore * 100).rounded()))%"
     }
 
@@ -2224,7 +2224,7 @@ struct LetterStatRow: View {
         if stat.targetAttempts == 0 && stat.distractorExposures == 0 {
             // Even an unseen letter can carry an override (parent marked
             // it without any in-app evidence). Surface that honestly.
-            if isOverridden { return "Override only — no in-app data" }
+            if isOverridden { return "Override only: no in-app data" }
             return "Not seen yet"
         }
         let totalSeen = stat.targetAttempts + stat.distractorExposures

@@ -138,11 +138,12 @@ struct ProfileLearningSnapshot: Equatable {
     let lettersByConfidence: [String]
 
     /// Known letters sorted by descending `LetterStat.reviewPriority`
-    /// (`0.6*weakness + 0.4*staleness`). Drives warm-up target selection:
-    /// a child who's reviewing the same set every day should *not* always
-    /// see their strongest letter first — they should see the one they
-    /// most recently missed or hadn't been tested on in a while.
-    /// Confidence-only ordering hides that signal.
+    /// (the FSRS-inspired scheduler priority: recall risk, weakness, lapse
+    /// pressure, uncertainty, overdueness, follow-ups). Drives warm-up
+    /// target selection: a child who's reviewing the same set every day
+    /// should *not* always see their strongest letter first — they should
+    /// see the one they most recently missed or hadn't been tested on in a
+    /// while. Confidence-only ordering hides that signal.
     ///
     /// Slowness used to be a third 0.2 term but was removed: for a
     /// distractible 3-year-old "slow on this letter" is mostly distraction

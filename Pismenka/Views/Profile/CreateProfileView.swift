@@ -156,7 +156,13 @@ struct FirstLaunchOnboardingView: View {
                     .foregroundColor(.ink)
                     .multilineTextAlignment(.center)
 
-                Text("Apple or Google sign-in lets Písmenka back up every child's progress, so you can restore it if this phone is lost or the app is accidentally deleted.")
+                Text("Without backup, progress can be lost if the app is deleted or you get a new phone.")
+                    .font(.brandBody(14, weight: .semibold))
+                    .foregroundColor(.slate500)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Apple or Google is only for backup. No ads, and we do not use your email for anything else.")
                     .font(.brandBody(14, weight: .semibold))
                     .foregroundColor(.slate500)
                     .multilineTextAlignment(.center)
@@ -227,7 +233,7 @@ struct FirstLaunchOnboardingView: View {
                     Button {
                         finishOnboarding()
                     } label: {
-                        Text("Not now — continue without backup")
+                        Text("Not now, continue without backup")
                             .font(.brandBody(14, weight: .black))
                             .foregroundColor(.slate600)
                             .frame(maxWidth: .infinity)

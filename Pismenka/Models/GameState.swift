@@ -483,6 +483,48 @@ final class AdaptiveGameState: ObservableObject {
     private let recentTargetMemoryLimit = 3
     private var strongAuditRoundsScheduled: Int = 0
 
+    /// Hard ceiling: on introduction (25-answer) days, no letter may be the
+    /// *target* more than this many times in one session — including rescue
+    /// retries. The only escape is a sparse profile with no other eligible
+    /// letter still under the cap.
+    private static let hardMaxTargetsPerLetterPerSession = 10
+
+    /// How often each letter has already been the target this session.
+    private var sessionTargetCounts: [String: Int] = [:]
+
+    /// Soft ceiling for how often the drill focus/spotlight may be the *target*
+    /// in one daily session. On introduction days this matches the hard
+    /// per-letter cap (10). Elsewhere ~40% of the goal.
+    private var maxFocusTargetsPerSession: Int {
+        if plan.dailyPracticeKind == .introduction {
+            return Self.hardMaxTargetsPerLetterPerSession
+        }
+        return max(3, Int(ceil(Double(max(1, plan.dailyGoalTarget)) * 0.4)))
+    }
+
+    /// Introduction days enforce the hard per-letter target cap.
+    private var enforcesPerLetterTargetCap: Bool {
+        plan.dailyPracticeKind == .introduction
+    }
+
+    private func letterUnderTargetCap(_ letter: String) -> Bool {
+        guard enforcesPerLetterTargetCap else { return true }
+        return sessionTargetCounts[letter, default: 0] < Self.hardMaxTargetsPerLetterPerSession
+    }
+
+    /// Prefer candidates still under the hard session cap. If every candidate
+    /// is already at the cap (sparse early profiles), return the original list
+    /// so play can continue.
+    private func preferringUnderTargetCap(_ candidates: [String]) -> [String] {
+        guard enforcesPerLetterTargetCap else { return candidates }
+        let under = candidates.filter(letterUnderTargetCap)
+        return under.isEmpty ? candidates : under
+    }
+
+    private func preferAskableTarget(_ candidates: [String]) -> String? {
+        preferNotRecentlyTargeted(preferringUnderTargetCap(uniqueEligibleTargets(candidates)))
+    }
+
     /// Weighted "good encounters" accumulator that drives the `practicePro`
     /// stamp in focus-letter sessions. See the award block in `processAnswer`
     /// for the per-round contributions. Threshold is `practiceProThreshold`.
@@ -874,6 +916,11 @@ final class AdaptiveGameState: ObservableObject {
             ? self.sessionPlayableWords
             : []
         self.sessionCorrectPositionCounts = Array(repeating: 0, count: optionsPerRound)
+        // Seed the per-letter target counts from today's persisted asks so the
+        // introduction-day hard cap ("never more than 10 asks of one letter")
+        // holds across multiple sittings on the same local day, not just
+        // within one app sitting.
+        self.sessionTargetCounts = profile.dailyTargetAskCounts(on: LocalDay.today())
         if let restoredSnapshot,
            restoredSnapshot.profileId == profile.id,
            restoredSnapshot.plan == plan {
@@ -1019,6 +1066,7 @@ final class AdaptiveGameState: ObservableObject {
             recentCorrectPositions: recentCorrectPositions,
             recentFocusCorrectPositions: recentFocusCorrectPositions,
             sessionCorrectPositionCounts: sessionCorrectPositionCounts,
+            sessionTargetCounts: sessionTargetCounts,
             advanceToNextRoundOnRestore: advanceToNextRoundOnRestore
         )
     }
@@ -1096,6 +1144,13 @@ final class AdaptiveGameState: ObservableObject {
         if snapshot.sessionCorrectPositionCounts.count == optionsPerRound {
             sessionCorrectPositionCounts = snapshot.sessionCorrectPositionCounts
         }
+        // The profile's persisted day counts (seeded in `init`) already include
+        // every *answered* ask today across sittings; the checkpoint counts
+        // additionally include an in-flight, not-yet-answered round. Per-letter
+        // max is the correct union of the two (checkpoint asks are a subset of
+        // the same day's asks plus at most that one in-flight round).
+        let restoredCounts = snapshot.sessionTargetCounts ?? [:]
+        sessionTargetCounts.merge(restoredCounts) { max($0, $1) }
     }
 
     // MARK: - Public API
@@ -1387,6 +1442,9 @@ final class AdaptiveGameState: ObservableObject {
         difficulty: RescueDifficulty,
         dueAfterRounds: Int
     ) {
+        // Hard session cap: do not schedule another ask of a letter that has
+        // already hit the introduction-day ceiling.
+        guard letterUnderTargetCap(letter) else { return }
         if rescueQueue.count >= AdaptiveGameState.rescueQueueCap {
             rescueQueue.removeFirst()
         }
@@ -1401,12 +1459,16 @@ final class AdaptiveGameState: ObservableObject {
     /// `nil` if no item is due. We scan from the front (oldest first)
     /// so an immediate-easy enqueued in the previous round always
     /// fires before any older delayed-mid that has aged into the
-    /// due-window during the same setup.
+    /// due-window during the same setup. Items already at the hard
+    /// target cap are dropped so rescue cannot push a letter over 10.
     private func dequeueDueRescue() -> RescueItem? {
-        guard let idx = rescueQueue.firstIndex(where: { $0.dueAfterRounds <= 0 }) else {
-            return nil
+        while let idx = rescueQueue.firstIndex(where: { $0.dueAfterRounds <= 0 }) {
+            let item = rescueQueue.remove(at: idx)
+            if letterUnderTargetCap(item.letterKey) {
+                return item
+            }
         }
-        return rescueQueue.remove(at: idx)
+        return nil
     }
 
     /// Decrement every remaining item's `dueAfterRounds` by one,
@@ -2278,6 +2340,7 @@ final class AdaptiveGameState: ObservableObject {
         if recentTargetLetters.count > recentTargetMemoryLimit {
             recentTargetLetters.removeFirst(recentTargetLetters.count - recentTargetMemoryLimit)
         }
+        sessionTargetCounts[targetLetter, default: 0] += 1
     }
 
     private func setTargetLetter(
@@ -2292,7 +2355,13 @@ final class AdaptiveGameState: ObservableObject {
                 nameLetter: profile.firstNameLetterKey
             )
             + language.letters
-        targetLetter = ([candidate] + fallback).first {
+        let pool = [candidate] + fallback
+        // Prefer any eligible letter still under the hard session cap; only
+        // fall back to an over-cap letter when the profile is too sparse to
+        // have alternatives (e.g. first days with one or two letters).
+        targetLetter = pool.first {
+            LetterDifficulty.isEligibleTarget($0, language: language) && letterUnderTargetCap($0)
+        } ?? pool.first {
             LetterDifficulty.isEligibleTarget($0, language: language)
         } ?? "A"
     }
@@ -2330,13 +2399,14 @@ final class AdaptiveGameState: ObservableObject {
         // Sweep through the highest-priority half before allowing repeats so
         // the child still sees variety. `max(3, count/2)` keeps the pool
         // usable when the child only knows a handful of letters.
-        let topHalf = Array(priorityOrder.prefix(max(3, priorityOrder.count / 2)))
+        let askablePriority = preferringUnderTargetCap(priorityOrder)
+        let topHalf = Array(askablePriority.prefix(max(3, askablePriority.count / 2)))
         let pool = topHalf.filter { !seenWarmupLetters.contains($0) }
-        let candidate = (pool.randomElement() ?? topHalf.randomElement() ?? priorityOrder.first!)
+        let candidate = (pool.randomElement() ?? topHalf.randomElement() ?? askablePriority.first!)
         let targetCandidate = (candidate == previousTarget && topHalf.count > 1)
             ? (topHalf.first(where: { $0 != previousTarget }) ?? candidate)
             : candidate
-        setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: priorityOrder)
+        setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: askablePriority)
         let target = targetLetter
         let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
 
@@ -2361,13 +2431,15 @@ final class AdaptiveGameState: ObservableObject {
         let confidence = profile.lettersByConfidence
         let scaffolding = scaffoldingLevel(forDrillFocus: focus, profile: profile)
 
-        // Target: usually 50% focus / 35% lower-confidence known /
-        // 15% high-confidence known, but with one override:
+        // Target mix (see `chooseDrillTarget` / `chooseIntroductionDrillTarget`):
+        // spotlight first, then introduced letters that are weak or
+        // under-practiced, with occasional strong letters for easy wins.
+        // Introduction days also enforce a hard per-letter target cap.
         //
-        //   * If the helloFocus stamp is still unearned and we're at or past
-        //     `firstFocusAppearanceDeadline`, force the focus letter as the
-        //     target. This guarantees the child gets *asked* to find their
-        //     new letter at least once before the heart budget can run out.
+        // One override: if the helloFocus stamp is still unearned and we're
+        // at or past `firstFocusAppearanceDeadline`, force the focus letter
+        // as the target so the child is asked for it before hearts run out
+        // — unless that letter has already hit the hard session cap.
         //
         // Note `roundsThisSession` is the count *before* this round is played,
         // so when we're building round number K (1-indexed), it equals K-1.
@@ -2375,6 +2447,7 @@ final class AdaptiveGameState: ObservableObject {
         // fires on the round number equal to the deadline.
         let mustForceFocus = !helloFocusAwarded
             && (roundsThisSession + 1) >= firstFocusAppearanceDeadline
+            && letterUnderTargetCap(focus)
         let targetCandidate: String = mustForceFocus
             ? focus
             : chooseDrillTarget(focus: focus, profile: profile)
@@ -3129,36 +3202,287 @@ final class AdaptiveGameState: ObservableObject {
     }
 
     private func chooseDrillTarget(focus: String, profile: Profile) -> String {
-        let roll = Double.random(in: 0..<1)
-        // Ask the focus regularly, but keep the last few targets varied so
-        // daily practice feels less like the same prompt on a loop.
-        let focusChance = focusTargetChance()
+        if plan.dailyPracticeKind == .introduction {
+            return chooseIntroductionDrillTarget(focus: focus, profile: profile)
+        }
+        return chooseStandardDrillTarget(focus: focus, profile: profile)
+    }
 
-        if roll < focusChance {
-            let urgent = uniqueEligibleTargets(
-                profile.snapshot.weakReviewLetters + profile.snapshot.dueReviewLetters
-            ).filter { $0 != focus }
-            if recentTargetLetters.contains(focus), !urgent.isEmpty {
-                return preferNotRecentlyTargeted(urgent) ?? focus
-            }
+    /// 25-answer introduction day mix:
+    /// 1. Spotlight / focus (prioritized, hard-capped at 10, no chaining)
+    /// 2. Contrast partner of the previous target when an active confusion
+    ///    pair exists (adjacent-round discrimination practice)
+    /// 3. Introduced letters that are weak (low success), under-practiced
+    ///    (low total target attempts), or whose predicted memory has decayed
+    ///    below the retention target — weighted-sampled so the day
+    ///    interleaves several letters instead of drilling the top two
+    /// 4. Occasional strong / easy letters at lower quantity (~15%, more when
+    ///    the session is going badly), picked by highest forgetting risk
+    private func chooseIntroductionDrillTarget(focus: String, profile: Profile) -> String {
+        let needsWork = introductionNeedsWorkCandidates(excluding: focus, profile: profile)
+        let strong = introductionStrongCandidates(excluding: focus, profile: profile)
+        let hasAlternatives = preferAskableTarget(needsWork + strong) != nil
+            || preferAskableTarget(
+                Array(profile.introducedLetters).filter { $0 != focus }
+            ) != nil
+
+        let focusChance = focusTargetChance()
+        let focusBudgetOpen = focusTargetAttemptsThisSession < maxFocusTargetsPerSession
+        let focusAvailable = letterUnderTargetCap(focus)
+        let focusWasJustAsked = previousTarget == focus
+            || recentTargetLetters.contains(focus)
+        let roll = Double.random(in: 0..<1)
+        let wantFocus = focusAvailable && focusBudgetOpen && roll < focusChance
+
+        if wantFocus, !(focusWasJustAsked && hasAlternatives) {
             return focus
         }
 
+        // Contrast interleaving: if the previous target is actively confused
+        // with another introduced letter (B/D, M/W, ...), asking the partner
+        // in an adjacent round is the most effective discrimination practice.
+        if let partner = activeContrastPartner(excluding: focus, profile: profile),
+           Double.random(in: 0..<1) < 0.35 {
+            return partner
+        }
+
+        // Prefer letters that still need work. From time to time, sprinkle in
+        // a strong letter so easy shapes stay familiar — more often when the
+        // session is going badly, so motivation survives a weak-letter day.
+        let preferStrongBreak = !strong.isEmpty && Double.random(in: 0..<1) < strongBreakChance()
+        if !preferStrongBreak, let work = weightedNeedsWorkTarget(needsWork, profile: profile) {
+            return work
+        }
+        if let easy = preferAskableTarget(strong) {
+            return easy
+        }
+        if let work = weightedNeedsWorkTarget(needsWork, profile: profile) {
+            return work
+        }
+
+        // Any other introduced letter under the cap.
+        if let other = preferAskableTarget(
+            Array(profile.introducedLetters).filter { $0 != focus }
+        ) {
+            return other
+        }
+
+        if focusAvailable {
+            return focus
+        }
+
+        // Sparse-profile escape: least-asked eligible letter.
+        let pool = uniqueEligibleTargets(
+            [focus] + Array(profile.introducedLetters) + profile.lettersByConfidence
+        )
+        return pool.min { a, b in
+            sessionTargetCounts[a, default: 0] < sessionTargetCounts[b, default: 0]
+        } ?? focus
+    }
+
+    /// Introduced letters (not the spotlight) that are weak on recent
+    /// success, have not been asked as target many times yet, or whose
+    /// spaced-repetition memory model says they are due for review. The
+    /// due clause is what turns the daily 25 into within-day spaced
+    /// repetition: a formerly strong letter whose predicted memory slipped
+    /// below the retention target needs work *now*, not at the next
+    /// six-session audit.
+    ///
+    /// The final clause aligns the pool with the parent letter map: a letter
+    /// that has never cleared the strong-evidence bar (`isStrongKnown`) nor
+    /// graduated shows as "Maybe" on the map even when its recent window
+    /// looks fine. Flipping it to green requires more independent evidence,
+    /// i.e. more asks, so it stays in the daily rotation until the Wilson
+    /// bound is earned.
+    private func introductionNeedsWorkCandidates(
+        excluding focus: String,
+        profile: Profile
+    ) -> [String] {
+        profile.introducedLetters
+            .filter {
+                $0 != focus && LetterDifficulty.isEligibleTarget($0, language: language)
+            }
+            .filter { letter in
+                guard let stat = profile.letterStats[letter] else { return true }
+                if stat.targetAttempts < 5 { return true }
+                if stat.recentAccuracy(window: 5) < 0.75 { return true }
+                if stat.isReviewDue() { return true }
+                return !stat.isStrongKnown
+                    && !stat.isFocusGraduated
+                    && !profile.everMasteredLetters.contains(letter)
+            }
+            .sorted {
+                introductionNeedsWorkScore($0, profile: profile)
+                    > introductionNeedsWorkScore($1, profile: profile)
+            }
+    }
+
+    /// Introduced letters the child is already solid on — used sparingly
+    /// so easy letters still appear without dominating the day. Ordered by
+    /// forgetting risk (scheduler priority), not by certainty: the break
+    /// round stays an easy win either way, so spend it on the strong letter
+    /// closest to slipping rather than the one the child is most sure of.
+    private func introductionStrongCandidates(
+        excluding focus: String,
+        profile: Profile
+    ) -> [String] {
+        profile.introducedLetters
+            .filter {
+                $0 != focus && LetterDifficulty.isEligibleTarget($0, language: language)
+            }
+            .filter { letter in
+                guard let stat = profile.letterStats[letter] else { return false }
+                return stat.targetAttempts >= 5 && stat.recentAccuracy(window: 5) >= 0.75
+            }
+            .sorted {
+                (profile.letterStats[$0]?.reviewPriority ?? 0)
+                    > (profile.letterStats[$1]?.reviewPriority ?? 0)
+            }
+    }
+
+    private func introductionNeedsWorkScore(_ letter: String, profile: Profile) -> Double {
+        let stat = profile.letterStats[letter]
+        let attempts = Double(stat?.targetAttempts ?? 0)
+        // 0 attempts → 1.0; 8+ attempts → 0.
+        let lowAttemptScore = max(0, 1.0 - attempts / 8.0)
+        let accuracy = (stat?.targetAttempts ?? 0) > 0
+            ? (stat?.recentAccuracy(window: 5) ?? 0)
+            : 0
+        let weakAccuracyScore = 1.0 - accuracy
+        let recallRisk = introductionRecallRisk(profile.letterStats[letter])
+        return 0.40 * weakAccuracyScore + 0.30 * lowAttemptScore + 0.30 * recallRisk
+    }
+
+    /// How far the letter's predicted retrievability has fallen below the
+    /// scheduler's retention target, normalized to `[0, 1]`. Never-attempted
+    /// letters count as maximal risk.
+    private func introductionRecallRisk(_ stat: LetterStat?) -> Double {
+        guard let stat, stat.targetAttempts > 0 else { return 1.0 }
+        let retention = AdaptiveLearningScheduler.desiredRetention
+        let retrievability = stat.predictedRetrievability(at: Date())
+        return min(1, max(0, (retention - retrievability) / retention))
+    }
+
+    /// Weighted random pick from the needs-work pool, using the same
+    /// eligibility / cap / recency filters as `preferAskableTarget` but
+    /// sampling proportionally to the needs-work score instead of always
+    /// taking the top. Deterministic top-picking round-robined the same 2-3
+    /// weakest letters all day; sampling interleaves more of the pool, which
+    /// both improves discrimination learning and avoids guaranteeing a
+    /// just-failed letter returns three rounds later.
+    private func weightedNeedsWorkTarget(
+        _ candidates: [String],
+        profile: Profile
+    ) -> String? {
+        let eligible = preferringUnderTargetCap(uniqueEligibleTargets(candidates))
+        guard !eligible.isEmpty else { return nil }
+        let recent = Set(recentTargetLetters)
+        let fresh = eligible.filter { !recent.contains($0) && $0 != previousTarget }
+        guard fresh.count > 1 else {
+            return fresh.first ?? preferNotRecentlyTargeted(eligible)
+        }
+        let weights = fresh.map {
+            max(0.05, introductionNeedsWorkScore($0, profile: profile))
+        }
+        return weightedRandomPick(fresh, weights: weights)
+    }
+
+    private func weightedRandomPick(_ pool: [String], weights: [Double]) -> String? {
+        guard !pool.isEmpty else { return nil }
+        let total = weights.reduce(0, +)
+        guard total > 0 else { return pool.randomElement() }
+        var roll = Double.random(in: 0..<total)
+        for (item, weight) in zip(pool, weights) {
+            roll -= weight
+            if roll < 0 { return item }
+        }
+        return pool.last
+    }
+
+    /// Partner letter of an *active* confusion pair involving the previous
+    /// target (child keeps picking it when the previous target is asked).
+    /// Only introduced, eligible letters still under the day cap qualify, and
+    /// recently targeted letters are skipped so the pair doesn't ping-pong.
+    private func activeContrastPartner(
+        excluding focus: String,
+        profile: Profile
+    ) -> String? {
+        guard let previous = previousTarget,
+              let stat = profile.letterStats[previous] else { return nil }
+        let now = Date()
+        return stat.confusionEvidence
+            .filter { $0.value.isActive(at: now) }
+            .sorted { $0.value.priority(at: now) > $1.value.priority(at: now) }
+            .map(\.key)
+            .first { partner in
+                partner != focus
+                    && partner != previous
+                    && profile.introducedLetters.contains(partner)
+                    && LetterDifficulty.isEligibleTarget(partner, language: language)
+                    && letterUnderTargetCap(partner)
+                    && !recentTargetLetters.contains(partner)
+            }
+    }
+
+    /// Chance that a non-focus drill round goes to a strong letter instead of
+    /// the needs-work pool. Base ~15%; raised when live session accuracy is
+    /// low so a struggling child still gets easy wins and stays engaged.
+    private func strongBreakChance() -> Double {
+        guard roundsThisSession >= 4 else { return 0.15 }
+        let accuracy = Double(roundsCorrect) / Double(max(1, roundsThisSession))
+        if accuracy < 0.55 { return 0.30 }
+        if accuracy < 0.70 { return 0.22 }
+        return 0.15
+    }
+
+    /// Non-introduction drill days: focus chance, then weak/due, then audits,
+    /// then known variety — still respecting the per-letter cap when active.
+    private func chooseStandardDrillTarget(focus: String, profile: Profile) -> String {
         let urgent = uniqueEligibleTargets(
             profile.snapshot.weakReviewLetters + profile.snapshot.dueReviewLetters
         ).filter { $0 != focus }
-        if let due = preferNotRecentlyTargeted(urgent) {
+        let knownVariety = profile.lettersByConfidence.filter {
+            $0 != focus && LetterDifficulty.isEligibleTarget($0, language: language)
+        }
+        let hasAlternatives = preferAskableTarget(urgent + knownVariety) != nil
+            || (strongAuditRoundsScheduled < strongAuditRoundBudget
+                && preferAskableTarget(
+                    profile.snapshot.auditReviewLetters.filter { $0 != focus }
+                ) != nil)
+
+        let focusChance = focusTargetChance()
+        let focusBudgetOpen = focusTargetAttemptsThisSession < maxFocusTargetsPerSession
+        let focusAvailable = letterUnderTargetCap(focus)
+        let focusWasJustAsked = previousTarget == focus
+            || recentTargetLetters.contains(focus)
+        let roll = Double.random(in: 0..<1)
+        let wantFocus = focusAvailable && focusBudgetOpen && roll < focusChance
+
+        if wantFocus, !(focusWasJustAsked && hasAlternatives) {
+            return focus
+        }
+
+        if let due = preferAskableTarget(urgent) {
             return due
         }
 
         if strongAuditRoundsScheduled < strongAuditRoundBudget {
             let audits = profile.snapshot.auditReviewLetters.filter { $0 != focus }
-            if let audit = preferNotRecentlyTargeted(audits) {
+            if let audit = preferAskableTarget(audits) {
                 strongAuditRoundsScheduled += 1
                 return audit
             }
         }
-        return focus
+
+        if let variety = preferAskableTarget(knownVariety) {
+            return variety
+        }
+
+        if focusAvailable {
+            return focus
+        }
+
+        return preferAskableTarget(knownVariety + urgent) ?? focus
     }
 
     // MARK: - Distractor pickers (with fallbacks)

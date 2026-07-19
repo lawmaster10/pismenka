@@ -271,6 +271,8 @@ class ProfileManager: ObservableObject {
         profiles[index].dailyPracticeAttempts = 0
         profiles[index].dailyPracticeWinnerClaimedDay = nil
         profiles[index].dailyPracticeWinnerClaimedMilestone = 0
+        profiles[index].dailyTargetAskDay = nil
+        profiles[index].dailyTargetAskCounts = [:]
         profiles[index].learningCycleStartDay = nil
         profiles[index].weeklyIntroducedLetters = []
         profiles[index].completedLetterSessionsInCycle = 0
@@ -404,7 +406,7 @@ class ProfileManager: ObservableObject {
                 clockMovedBackward = true
                 #if DEBUG
                 print("⚠️ ProfileManager: clock moved backward " +
-                      "(today=\(today.iso8601), last=\(last.iso8601), delta=\(delta)) — " +
+                      "(today=\(today.iso8601), last=\(last.iso8601), delta=\(delta)): " +
                       "preserving streak=\(profile.dailyStreakCount)")
                 #endif
             } else if delta == 0 {
@@ -990,6 +992,12 @@ class ProfileManager: ObservableObject {
             // deliberately do NOT take this branch and so cannot
             // inflate the persisted set.
             profile.introducedLetters.insert(letter)
+            // Every target ask counts toward the per-day exposure cap,
+            // impulse-discounted or not — the child saw the round either
+            // way. New sittings seed the engine's session counts from
+            // this map so the "max 10 asks of one letter" rule holds per
+            // calendar day, not just per app sitting.
+            profile.recordDailyTargetAsk(letter: letter)
         } else {
             stat.recordDistractorExposure()
         }

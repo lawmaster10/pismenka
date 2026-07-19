@@ -493,6 +493,12 @@ struct Profile: Identifiable, Codable, Equatable {
     var dailyPracticeWinnerClaimedDay: LocalDay?
     var dailyPracticeWinnerClaimedMilestone: Int
 
+    /// Per-letter *target ask* counts for the current local day, across all
+    /// sittings. Backs the introduction-day "never more than 10 asks of one
+    /// letter" cap so it holds per calendar day, not just per app sitting.
+    var dailyTargetAskDay: LocalDay?
+    var dailyTargetAskCounts: [String: Int]
+
     /// Practice-count rhythm state: after six completed 25-answer letter
     /// sessions, the next session is a retention check. The cohort set tracks
     /// letters intentionally introduced during that practice cycle.
@@ -675,6 +681,20 @@ struct Profile: Identifiable, Codable, Equatable {
         dailyPracticeDay == day ? dailyPracticeAttempts : 0
     }
 
+    /// Per-letter target-ask counts for `day`; empty when the stored counts
+    /// belong to an earlier local day.
+    func dailyTargetAskCounts(on day: LocalDay = LocalDay.today()) -> [String: Int] {
+        dailyTargetAskDay == day ? dailyTargetAskCounts : [:]
+    }
+
+    mutating func recordDailyTargetAsk(letter: String, on day: LocalDay = LocalDay.today()) {
+        if dailyTargetAskDay != day {
+            dailyTargetAskDay = day
+            dailyTargetAskCounts = [:]
+        }
+        dailyTargetAskCounts[letter, default: 0] += 1
+    }
+
     func dailyPracticeWinnerClaimedCount(on day: LocalDay = LocalDay.today()) -> Int {
         dailyPracticeWinnerClaimedDay == day ? max(0, dailyPracticeWinnerClaimedMilestone) : 0
     }
@@ -740,6 +760,8 @@ struct Profile: Identifiable, Codable, Equatable {
         dailyPracticeAttempts: Int = 0,
         dailyPracticeWinnerClaimedDay: LocalDay? = nil,
         dailyPracticeWinnerClaimedMilestone: Int = 0,
+        dailyTargetAskDay: LocalDay? = nil,
+        dailyTargetAskCounts: [String: Int] = [:],
         learningCycleStartDay: LocalDay? = nil,
         weeklyIntroducedLetters: Set<String> = [],
         completedLetterSessionsInCycle: Int = 0,
@@ -793,6 +815,8 @@ struct Profile: Identifiable, Codable, Equatable {
         self.dailyPracticeAttempts = dailyPracticeAttempts
         self.dailyPracticeWinnerClaimedDay = dailyPracticeWinnerClaimedDay
         self.dailyPracticeWinnerClaimedMilestone = dailyPracticeWinnerClaimedMilestone
+        self.dailyTargetAskDay = dailyTargetAskDay
+        self.dailyTargetAskCounts = dailyTargetAskCounts
         self.learningCycleStartDay = learningCycleStartDay
         self.weeklyIntroducedLetters = weeklyIntroducedLetters
         self.completedLetterSessionsInCycle = max(0, completedLetterSessionsInCycle)
@@ -878,6 +902,11 @@ struct Profile: Identifiable, Codable, Equatable {
             Int.self,
             forKey: .dailyPracticeWinnerClaimedMilestone
         ) ?? 0
+        dailyTargetAskDay = try c.decodeIfPresent(LocalDay.self, forKey: .dailyTargetAskDay)
+        dailyTargetAskCounts = try c.decodeIfPresent(
+            [String: Int].self,
+            forKey: .dailyTargetAskCounts
+        ) ?? [:]
         learningCycleStartDay = try c.decodeIfPresent(LocalDay.self, forKey: .learningCycleStartDay)
         weeklyIntroducedLetters = try c.decodeIfPresent(Set<String>.self, forKey: .weeklyIntroducedLetters) ?? []
         if let saved = try c.decodeIfPresent(Int.self, forKey: .completedLetterSessionsInCycle) {
@@ -1023,6 +1052,7 @@ struct Profile: Identifiable, Codable, Equatable {
         case lastNewLetterDay, cameoExposureDay, cameoExposuresToday
         case dailyPracticeDay, dailyPracticeAttempts
         case dailyPracticeWinnerClaimedDay, dailyPracticeWinnerClaimedMilestone
+        case dailyTargetAskDay, dailyTargetAskCounts
         case learningCycleStartDay, weeklyIntroducedLetters, completedLetterSessionsInCycle
         case activeWeeklyAssessment, recentWeeklyAssessments
         case lastSessionDay
@@ -1083,6 +1113,8 @@ struct Profile: Identifiable, Codable, Equatable {
         try c.encode(dailyPracticeAttempts, forKey: .dailyPracticeAttempts)
         try c.encodeIfPresent(dailyPracticeWinnerClaimedDay, forKey: .dailyPracticeWinnerClaimedDay)
         try c.encode(dailyPracticeWinnerClaimedMilestone, forKey: .dailyPracticeWinnerClaimedMilestone)
+        try c.encodeIfPresent(dailyTargetAskDay, forKey: .dailyTargetAskDay)
+        try c.encode(dailyTargetAskCounts, forKey: .dailyTargetAskCounts)
         try c.encodeIfPresent(learningCycleStartDay, forKey: .learningCycleStartDay)
         try c.encode(weeklyIntroducedLetters, forKey: .weeklyIntroducedLetters)
         try c.encode(completedLetterSessionsInCycle, forKey: .completedLetterSessionsInCycle)
@@ -1434,7 +1466,8 @@ struct Profile: Identifiable, Codable, Equatable {
     }
 
     /// Known letters sorted by descending `LetterStat.reviewPriority`
-    /// (`0.5*weakness + 0.3*staleness + 0.2*slowness`). Drives warm-up
+    /// (the FSRS-inspired scheduler priority: recall risk, weakness, lapse
+    /// pressure, uncertainty, overdueness, follow-ups). Drives warm-up
     /// target selection from Phase 2b on. Letters tied on priority (or all
     /// at 0 because they have no recent activity yet) fall back to
     /// descending certainty so the order stays deterministic and "the

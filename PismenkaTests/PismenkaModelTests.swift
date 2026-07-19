@@ -1533,6 +1533,346 @@ final class PismenkaModelTests: XCTestCase {
     }
 
     @MainActor
+    func testIntroducedSpotlightDoesNotDominateDailyLetterSession() throws {
+        // Regression: introduction days must hard-cap any letter at 10 target
+        // asks, prioritize the spotlight without chaining it, fill the rest
+        // with weak / under-practiced introduced letters, and only lightly
+        // sprinkle strong letters.
+        let today = LocalDay.today()
+        let yesterday = today.adding(days: -1)
+        let strongLetters: Set<String> = ["A", "B", "C", "D", "E", "F", "G", "H"]
+        let weakLetters: Set<String> = ["I", "J", "K", "L"]
+        let lowAttemptLetters: Set<String> = ["M", "N"]
+        var letterStats = knownStats(for: strongLetters)
+        for letter in weakLetters {
+            letterStats[letter] = knownStat(correctCount: 2, incorrectCount: 6)
+        }
+        for letter in lowAttemptLetters {
+            letterStats[letter] = knownStat(correctCount: 1, incorrectCount: 0)
+        }
+        let introduced = strongLetters.union(weakLetters).union(lowAttemptLetters)
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: letterStats,
+            hasCompletedCalibration: true,
+            currentFocusLetter: "A",
+            focusStartedDay: yesterday,
+            focusPracticedDays: [yesterday],
+            lastNewLetterDay: yesterday,
+            learningCycleStartDay: yesterday,
+            weeklyIntroducedLetters: ["A"],
+            everMasteredLetters: strongLetters,
+            introducedLetters: introduced
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id)
+        let spotlight: String = try XCTUnwrap(plan.dailySpotlightLetter)
+        XCTAssertEqual(plan.dailyPracticeKind, .introduction)
+        XCTAssertEqual(plan.dailyGoalTarget, 25)
+        XCTAssertEqual(plan.introducedFocusTarget, FocusTarget.letter(spotlight))
+
+        let state = AdaptiveGameState(profile: manager.profiles[0], plan: plan, profileManager: manager)
+        var counts: [String: Int] = [:]
+        var spotlightTargets = 0
+        var needsWorkTargets = 0
+        var strongTargets = 0
+        var maxConsecutiveSpotlightTargets = 0
+        var currentConsecutiveSpotlightTargets = 0
+        var targets: [String] = []
+        let needsWorkPool = weakLetters.union(lowAttemptLetters)
+
+        for _ in 0..<plan.dailyGoalTarget {
+            let target = state.targetLetter
+            targets.append(target)
+            counts[target, default: 0] += 1
+            if target == spotlight {
+                spotlightTargets += 1
+                currentConsecutiveSpotlightTargets += 1
+                maxConsecutiveSpotlightTargets = max(
+                    maxConsecutiveSpotlightTargets,
+                    currentConsecutiveSpotlightTargets
+                )
+            } else {
+                currentConsecutiveSpotlightTargets = 0
+                if needsWorkPool.contains(target) {
+                    needsWorkTargets += 1
+                } else if strongLetters.contains(target) {
+                    strongTargets += 1
+                }
+            }
+
+            let outcome = state.processAnswer(target)
+            if outcome.sessionEndReason != nil { break }
+            state.setupNewRound()
+        }
+
+        XCTAssertGreaterThanOrEqual(spotlightTargets, 1, "Spotlight must still be practiced: \(targets)")
+        XCTAssertLessThanOrEqual(
+            maxConsecutiveSpotlightTargets,
+            2,
+            "Spotlight must not be chained as the target: \(targets)"
+        )
+        for (letter, count) in counts {
+            XCTAssertLessThanOrEqual(
+                count,
+                10,
+                "Hard cap: \(letter) asked \(count) times in \(targets)"
+            )
+        }
+        XCTAssertGreaterThan(
+            needsWorkTargets,
+            strongTargets,
+            "Weak/low-attempt letters should outnumber strong fillers: \(targets)"
+        )
+    }
+
+    @MainActor
+    func testIntroductionDayHardCapBlocksRescueOverTen() throws {
+        let today = LocalDay.today()
+        let yesterday = today.adding(days: -1)
+        let knownLetters: Set<String> = [
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"
+        ]
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: knownLetters),
+            hasCompletedCalibration: true,
+            currentFocusLetter: "A",
+            focusStartedDay: yesterday,
+            focusPracticedDays: [yesterday],
+            lastNewLetterDay: yesterday,
+            learningCycleStartDay: yesterday,
+            weeklyIntroducedLetters: ["A"],
+            everMasteredLetters: knownLetters,
+            introducedLetters: knownLetters
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id)
+        let spotlight: String = try XCTUnwrap(plan.dailySpotlightLetter)
+        XCTAssertEqual(plan.dailyPracticeKind, .introduction)
+
+        let state = AdaptiveGameState(profile: manager.profiles[0], plan: plan, profileManager: manager)
+        var counts: [String: Int] = [:]
+
+        // Keep missing until the hard cap must absorb rescue pressure.
+        for _ in 0..<40 {
+            let target = state.targetLetter
+            counts[target, default: 0] += 1
+            let wrong = state.displayedLetters.first { $0 != target } ?? target
+            let outcome = state.processAnswer(target == spotlight ? wrong : target)
+            if outcome.sessionEndReason != nil { break }
+            state.setupNewRound()
+        }
+
+        XCTAssertLessThanOrEqual(counts[spotlight, default: 0], 10)
+        for (letter, count) in counts {
+            XCTAssertLessThanOrEqual(count, 10, "\(letter) exceeded hard cap in rescue stress run")
+        }
+    }
+
+    @MainActor
+    func testIntroductionDayTargetCapPersistsAcrossSameDaySittings() throws {
+        // The "never more than 10 asks of one letter" rule must hold per
+        // calendar day, not per app sitting. Simulate an earlier sitting today
+        // that already spent the spotlight's full ask budget, then verify a
+        // fresh engine refuses to target it again.
+        let today = LocalDay.today()
+        let yesterday = today.adding(days: -1)
+        let knownLetters: Set<String> = [
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"
+        ]
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: knownLetters),
+            hasCompletedCalibration: true,
+            currentFocusLetter: "A",
+            focusStartedDay: yesterday,
+            focusPracticedDays: [yesterday],
+            lastNewLetterDay: yesterday,
+            learningCycleStartDay: yesterday,
+            weeklyIntroducedLetters: ["A"],
+            everMasteredLetters: knownLetters,
+            introducedLetters: knownLetters
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id)
+        let spotlight: String = try XCTUnwrap(plan.dailySpotlightLetter)
+        XCTAssertEqual(plan.dailyPracticeKind, .introduction)
+
+        manager.profiles[0].dailyTargetAskDay = today
+        manager.profiles[0].dailyTargetAskCounts = [spotlight: 10]
+
+        let state = AdaptiveGameState(profile: manager.profiles[0], plan: plan, profileManager: manager)
+        var spotlightTargets = 0
+        var roundsPlayed = 0
+        for _ in 0..<plan.dailyGoalTarget {
+            if state.targetLetter == spotlight {
+                spotlightTargets += 1
+            }
+            roundsPlayed += 1
+            let outcome = state.processAnswer(state.targetLetter)
+            if outcome.sessionEndReason != nil { break }
+            state.setupNewRound()
+        }
+
+        XCTAssertEqual(
+            spotlightTargets,
+            0,
+            "Spotlight already hit the 10-ask day cap in an earlier sitting"
+        )
+        XCTAssertGreaterThan(roundsPlayed, 0)
+        // Answered target rounds keep accruing into the persisted day counts.
+        let persisted = manager.profiles[0].dailyTargetAskCounts(on: today)
+        XCTAssertEqual(persisted[spotlight], 10)
+        XCTAssertGreaterThanOrEqual(
+            persisted.values.reduce(0, +) - 10,
+            roundsPlayed - 1,
+            "Every answered target ask should persist into the day counts"
+        )
+    }
+
+    @MainActor
+    func testDecayedStrongLetterReturnsToDailyMix() throws {
+        // A letter the child aced a month ago is predicted (by the memory
+        // scheduler) to have decayed below the retention target. It must
+        // re-enter the daily needs-work rotation instead of waiting for the
+        // six-session audit, even though its recent accuracy still looks
+        // strong on paper.
+        let today = LocalDay.today()
+        let yesterday = today.adding(days: -1)
+        let monthAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
+        let freshStrong: Set<String> = ["A", "B", "C", "D", "E", "F", "G", "H"]
+        var letterStats = knownStats(for: freshStrong)
+        var decayed = LetterStat(
+            recentResults: Array(repeating: true, count: 6),
+            targetAttempts: 6,
+            targetCorrect: 6,
+            firstSeenAt: monthAgo,
+            lastSeenAt: monthAgo,
+            lastTestedAt: monthAgo
+        )
+        decayed.memoryState = AdaptiveLearningScheduler.migratedState(
+            targetAttempts: 6,
+            targetCorrect: 6,
+            recentResults: Array(repeating: true, count: 6),
+            lastTestedAt: monthAgo
+        )
+        letterStats["K"] = decayed
+        XCTAssertTrue(decayed.isReviewDue(), "Test setup: the decayed letter must be due")
+
+        let introduced = freshStrong.union(["K"])
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: letterStats,
+            hasCompletedCalibration: true,
+            currentFocusLetter: "A",
+            focusStartedDay: yesterday,
+            focusPracticedDays: [yesterday],
+            lastNewLetterDay: yesterday,
+            learningCycleStartDay: yesterday,
+            weeklyIntroducedLetters: ["A"],
+            everMasteredLetters: freshStrong,
+            introducedLetters: introduced
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id)
+        XCTAssertEqual(plan.dailyPracticeKind, .introduction)
+
+        let state = AdaptiveGameState(profile: manager.profiles[0], plan: plan, profileManager: manager)
+        var decayedTargets = 0
+        for _ in 0..<plan.dailyGoalTarget {
+            if state.targetLetter == "K" {
+                decayedTargets += 1
+            }
+            let outcome = state.processAnswer(state.targetLetter)
+            if outcome.sessionEndReason != nil { break }
+            state.setupNewRound()
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            decayedTargets,
+            2,
+            "A review-due letter must be practiced during the daily 25"
+        )
+    }
+
+    @MainActor
+    func testMaybeLetterWithoutStrongEvidenceStaysInDailyRotation() throws {
+        // Parent-map alignment: a letter answering well recently (recent
+        // accuracy >= 75%, >= 5 lifetime asks, not review-due) but without
+        // enough lifetime evidence to clear `isStrongKnown` shows as "Maybe"
+        // on the letter map. It must keep receiving daily asks so the Wilson
+        // bound can be earned and the tile can flip to green.
+        let today = LocalDay.today()
+        let yesterday = today.adding(days: -1)
+        let freshStrong: Set<String> = ["A", "B", "C", "D", "E", "F", "G", "H"]
+        var letterStats = knownStats(for: freshStrong)
+        // 5 correct out of 6 lifetime: recent window is clean, but the
+        // Wilson lower bound stays below the strong-known bar.
+        var maybeStat = LetterStat()
+        maybeStat.recordTargetAttempt(correct: false, responseTime: 1.0)
+        for _ in 0..<5 {
+            maybeStat.recordTargetAttempt(correct: true, responseTime: 1.0)
+        }
+        letterStats["K"] = maybeStat
+        XCTAssertFalse(maybeStat.isStrongKnown, "Test setup: K must not be strong-known yet")
+        XCTAssertTrue(maybeStat.isKnown, "Test setup: K should still pass the loose check")
+        XCTAssertGreaterThanOrEqual(maybeStat.recentAccuracy(window: 5), 0.75)
+        XCTAssertFalse(maybeStat.isReviewDue(), "Test setup: K must not be due yet")
+
+        let introduced = freshStrong.union(["K"])
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: letterStats,
+            hasCompletedCalibration: true,
+            currentFocusLetter: "A",
+            focusStartedDay: yesterday,
+            focusPracticedDays: [yesterday],
+            lastNewLetterDay: yesterday,
+            learningCycleStartDay: yesterday,
+            weeklyIntroducedLetters: ["A"],
+            everMasteredLetters: freshStrong,
+            introducedLetters: introduced
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id)
+        XCTAssertEqual(plan.dailyPracticeKind, .introduction)
+
+        let state = AdaptiveGameState(profile: manager.profiles[0], plan: plan, profileManager: manager)
+        var maybeTargets = 0
+        for _ in 0..<plan.dailyGoalTarget {
+            if state.targetLetter == "K" {
+                maybeTargets += 1
+            }
+            let outcome = state.processAnswer(state.targetLetter)
+            if outcome.sessionEndReason != nil { break }
+            state.setupNewRound()
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            maybeTargets,
+            2,
+            "A map-'Maybe' letter without strong evidence must stay in the daily rotation"
+        )
+    }
+
+    @MainActor
     func testCounterOnlyAdvancesWhenAdaptiveDailyRoundRequestsIt() {
         let today = LocalDay.today()
         let profile = Profile(
