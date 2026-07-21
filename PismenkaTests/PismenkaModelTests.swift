@@ -4783,3 +4783,406 @@ final class PismenkaModelTests: XCTestCase {
         )
     }
 }
+
+// MARK: - Numbers Mode
+
+@MainActor
+final class NumbersModeTests: XCTestCase {
+    func testTransposeBlockedAtAvoidPolicy() {
+        XCTAssertFalse(
+            NumberDifficulty.isAllowedDistractor("62", for: "26", policy: .avoid),
+            "Digit transposes must be blocked under the avoid policy"
+        )
+        // pickDistractors must never surface the transpose under avoid,
+        // regardless of shuffle outcome.
+        for _ in 0..<20 {
+            let picked = NumberDifficulty.pickDistractors(
+                target: "26",
+                count: 3,
+                from: ["62", "1", "4", "8", "30"],
+                policy: .avoid
+            )
+            XCTAssertFalse(picked.contains("62"))
+        }
+        // Transposes become available for deliberate contrast practice.
+        XCTAssertTrue(
+            NumberDifficulty.isAllowedDistractor("62", for: "26", policy: .intentionallyPractice)
+        )
+    }
+
+    func testNumberFocusTargetStorageKeyRoundTrips() {
+        let target = FocusTarget.number("5")
+        XCTAssertEqual(target.storageKey, "number:5")
+        XCTAssertEqual(FocusTarget(storageKey: "number:5"), target)
+        // Bare single characters stay in the letter namespace — a bare "5"
+        // must never silently become a number. Number paths must always emit
+        // the `number:` prefix (never bare digit keys into FocusTarget APIs).
+        XCTAssertEqual(FocusTarget(storageKey: "5"), .letter("5"))
+        XCTAssertNil(FocusTarget(storageKey: "26")) // multi-digit bare keys are not letters either
+        XCTAssertEqual(FocusTarget(storageKey: "number:26"), .number("26"))
+    }
+
+    func testStartPracticeSessionForNumberUsesNumbersLayerAndReusedExtraPracticeMode() {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            introducedNumbers: ["5", "6", "7"],
+            hasCompletedNumberCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let plan = manager.startPracticeSession(profileId: profile.id, number: "6")
+
+        XCTAssertEqual(plan.primaryLayer, .numbers)
+        XCTAssertEqual(plan.activityKind, .numberRecognition)
+        XCTAssertEqual(plan.mode, .extraPractice(letter: "6"))
+        XCTAssertEqual(plan.mode.practiceLetter, "6")
+    }
+
+    func testResetAllProgressWipesNumberStateButKeepsTrophyBands() {
+        var stat = NumberStat()
+        stat.recordTargetAttempt(correct: true, responseTime: 1.0)
+        let today = LocalDay.today()
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            numberStats: ["5": stat],
+            introducedNumbers: ["5", "2"],
+            everMasteredNumbers: ["5"],
+            currentFocusNumber: "2",
+            hasCompletedNumberCalibration: true,
+            numberFocusStartedDay: today,
+            numberFocusPracticedDays: [today],
+            lastNewNumberDay: today,
+            pausedFocusNumbers: ["9"],
+            pausedFocusNumberDays: ["9": today],
+            numberDailyPracticeDay: today,
+            numberDailyPracticeAttempts: 12,
+            numberDailyPracticeWinnerClaimedDay: today,
+            numberDailyPracticeWinnerClaimedMilestone: 25,
+            numberCameoExposureDay: today,
+            numberCameoExposuresToday: 2,
+            numberDailyTargetAskDay: today,
+            numberDailyTargetAskCounts: ["5": 3],
+            numberLearningCycleStartDay: today,
+            weeklyIntroducedNumbers: ["5"],
+            completedNumberSessionsInCycle: 3,
+            numberGridPerformanceStats: [4: GridPerformanceStat()],
+            lastFrozenNumberOptionsPerRound: 6,
+            highestNumberBandEverReached: .developing,
+            celebratedNumberBands: [.beginner, .developing]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        manager.resetAllProgress(profileId: profile.id)
+
+        let reset = manager.profiles[0]
+        XCTAssertTrue(reset.numberStats.isEmpty)
+        XCTAssertTrue(reset.introducedNumbers.isEmpty)
+        XCTAssertTrue(reset.everMasteredNumbers.isEmpty)
+        XCTAssertNil(reset.currentFocusNumber)
+        XCTAssertFalse(reset.hasCompletedNumberCalibration)
+        XCTAssertNil(reset.numberFocusStartedDay)
+        XCTAssertTrue(reset.numberFocusPracticedDays.isEmpty)
+        XCTAssertNil(reset.lastNewNumberDay)
+        XCTAssertTrue(reset.pausedFocusNumbers.isEmpty)
+        XCTAssertTrue(reset.pausedFocusNumberDays.isEmpty)
+        XCTAssertEqual(reset.numberDailyPracticeAttempts, 0)
+        XCTAssertNil(reset.numberDailyPracticeWinnerClaimedDay)
+        XCTAssertEqual(reset.numberCameoExposuresToday, 0)
+        XCTAssertTrue(reset.numberDailyTargetAskCounts.isEmpty)
+        XCTAssertEqual(reset.completedNumberSessionsInCycle, 0)
+        XCTAssertNil(reset.numberLearningCycleStartDay)
+        XCTAssertTrue(reset.weeklyIntroducedNumbers.isEmpty)
+        XCTAssertNil(reset.activeWeeklyNumberAssessment)
+        XCTAssertTrue(reset.recentWeeklyNumberAssessments.isEmpty)
+        XCTAssertTrue(reset.numberGridPerformanceStats.isEmpty)
+        XCTAssertNil(reset.lastFrozenNumberOptionsPerRound)
+        // Trophy bands are lifetime receipts and survive a full reset.
+        XCTAssertEqual(reset.highestNumberBandEverReached, .developing)
+        XCTAssertEqual(reset.celebratedNumberBands, [.beginner, .developing])
+    }
+
+    func testLettersSessionPlanUnchangedByExplicitLetterLayer() {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            hasCompletedCalibration: true,
+            introducedLetters: ["A", "B", "C"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let plan = manager.previewSessionPlan(profileId: profile.id, layer: .letters)
+
+        XCTAssertEqual(plan.primaryLayer, .letters)
+        XCTAssertEqual(plan.activityKind, .letterRecognition)
+        // Letters planning must not touch any numbers-cycle state.
+        XCTAssertNil(manager.profiles[0].numberLearningCycleStartDay)
+        XCTAssertEqual(manager.profiles[0].completedNumberSessionsInCycle, 0)
+        XCTAssertNil(manager.profiles[0].activeWeeklyNumberAssessment)
+    }
+
+    func testNumbersSessionPlanUsesNumbersLayerWithoutSyllableUnlock() throws {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            hasCompletedCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let plan = manager.commitSessionStartIfNeeded(profileId: profile.id, layer: .numbers)
+
+        XCTAssertEqual(plan.primaryLayer, .numbers)
+        XCTAssertEqual(plan.activityKind, .numberRecognition)
+        // Spotlight introduction must produce a typed number focus target and
+        // keep the bare key in the string fields.
+        if let focus = plan.focusLetter {
+            XCTAssertEqual(plan.focusTarget, .number(focus))
+            XCTAssertTrue(NumberDifficulty.isEligibleTarget(focus))
+        }
+        // Numbers must NEVER unlock the syllables layer.
+        XCTAssertNil(manager.profiles[0].syllablesUnlockedAt)
+        // And must not consume letter-cycle counters.
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 0)
+    }
+
+    func testRecordNumberAnswerWritesNumberStatsAndEvent() throws {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            hasCompletedCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        manager.recordAnswer(
+            profileId: profile.id,
+            target: .number("2"),
+            wasCorrect: true,
+            asTarget: true,
+            optionsShown: [.number("2"), .number("4"), .number("8"), .number("6")],
+            activityKind: .numberRecognition
+        )
+
+        let updated = manager.profiles[0]
+        XCTAssertEqual(updated.numberStats["2"]?.targetAttempts, 1)
+        XCTAssertEqual(updated.numberStats["2"]?.targetCorrect, 1)
+        XCTAssertTrue(updated.introducedNumbers.contains("2"))
+        // Letter-layer state must stay untouched.
+        XCTAssertNil(updated.letterStats["2"])
+        XCTAssertNil(updated.syllablesUnlockedAt)
+        let event = try XCTUnwrap(updated.recentRoundEvents.last)
+        XCTAssertEqual(event.unitKind, .number)
+    }
+
+    func testDigitContainmentBlockedAtAvoidPolicy() {
+        XCTAssertTrue(NumberDifficulty.isDigitContainment("1", "10"))
+        XCTAssertFalse(
+            NumberDifficulty.isAllowedDistractor("1", for: "10", policy: .avoid),
+            "Digit containment (1 inside 10) must be blocked under the avoid policy"
+        )
+        XCTAssertFalse(NumberDifficulty.isAllowedDistractor("10", for: "1", policy: .avoid))
+        // Deliberate contrast practice may surface the containment pair.
+        XCTAssertTrue(
+            NumberDifficulty.isAllowedDistractor("1", for: "10", policy: .intentionallyPractice)
+        )
+    }
+
+    func testLetterPreviewPlansMatchAcrossDefaultAndExplicitLayer() {
+        // Calibrated letter profile with a durable focus and today's
+        // introduction already spent, so both previews are deterministic.
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            letterStats: [
+                "A": LetterStat(targetAttempts: 6, targetCorrect: 6),
+                "B": LetterStat(targetAttempts: 4, targetCorrect: 3)
+            ],
+            hasCompletedCalibration: true,
+            currentFocusLetter: "B",
+            focusStartedDay: LocalDay.today(),
+            lastNewLetterDay: LocalDay.today(),
+            introducedLetters: ["A", "B"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let defaultPlan = manager.previewSessionPlan(profileId: profile.id)
+        let explicitPlan = manager.previewSessionPlan(profileId: profile.id, layer: .letters)
+
+        XCTAssertEqual(explicitPlan.primaryLayer, .letters)
+        XCTAssertEqual(defaultPlan.primaryLayer, explicitPlan.primaryLayer)
+        XCTAssertEqual(defaultPlan.activityKind, explicitPlan.activityKind)
+        XCTAssertEqual(defaultPlan.focusLetter, explicitPlan.focusLetter)
+        XCTAssertEqual(defaultPlan.focusTarget, explicitPlan.focusTarget)
+        XCTAssertEqual(defaultPlan.warmupLength, explicitPlan.warmupLength)
+        XCTAssertEqual(defaultPlan.dailyGoalTarget, explicitPlan.dailyGoalTarget)
+        XCTAssertEqual(defaultPlan.dailyPracticeKind, explicitPlan.dailyPracticeKind)
+        XCTAssertEqual(defaultPlan.dayStreakCount, explicitPlan.dayStreakCount)
+        // Letters planning must never touch number fields.
+        XCTAssertTrue(manager.profiles[0].numberStats.isEmpty)
+        XCTAssertTrue(manager.profiles[0].introducedNumbers.isEmpty)
+        XCTAssertNil(manager.profiles[0].currentFocusNumber)
+        XCTAssertNil(manager.profiles[0].numberLearningCycleStartDay)
+    }
+
+    func testWinnerClaimsDoNotCrossContaminateCycleCounters() {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            hasCompletedCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        // A numbers Winner moves only the numbers cycle counter.
+        manager.claimDailyPracticeWinner(profileId: profile.id, milestone: 25, layer: .numbers)
+        XCTAssertEqual(manager.profiles[0].completedNumberSessionsInCycle, 1)
+        XCTAssertEqual(
+            manager.profiles[0].completedLetterSessionsInCycle, 0,
+            "Numbers Winner must not consume the letters cycle"
+        )
+
+        // A letters Winner moves only the letters cycle counter.
+        manager.claimDailyPracticeWinner(profileId: profile.id, milestone: 25, layer: .letters)
+        XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 1)
+        XCTAssertEqual(
+            manager.profiles[0].completedNumberSessionsInCycle, 1,
+            "Letters Winner must not consume the numbers cycle"
+        )
+    }
+
+    func testSharedStreakDoesNotDoubleIncrementAcrossLayersSameDay() {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            hasCompletedCalibration: true,
+            introducedLetters: ["A", "B", "C"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        let letterPlan = manager.commitSessionStartIfNeeded(profileId: profile.id, layer: .letters)
+        XCTAssertTrue(letterPlan.dayStreakIncreased)
+        XCTAssertEqual(manager.profiles[0].dailyStreakCount, 1)
+
+        let numberPlan = manager.commitSessionStartIfNeeded(profileId: profile.id, layer: .numbers)
+        XCTAssertFalse(
+            numberPlan.dayStreakIncreased,
+            "A numbers session on the same LocalDay must not re-increment the shared streak"
+        )
+        XCTAssertEqual(numberPlan.dayStreakCount, 1)
+        XCTAssertEqual(manager.profiles[0].dailyStreakCount, 1)
+    }
+
+    func testRecordLetterAnswerWritesLetterUnitKind() throws {
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            hasCompletedCalibration: true,
+            introducedLetters: ["A"]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+
+        manager.recordAnswer(
+            profileId: profile.id,
+            target: .letter("A"),
+            wasCorrect: true,
+            asTarget: true,
+            optionsShown: [.letter("A"), .letter("B"), .letter("C"), .letter("D")]
+        )
+
+        let event = try XCTUnwrap(manager.profiles[0].recentRoundEvents.last)
+        XCTAssertEqual(event.unitKind, .letter)
+        // Letter answers must not leak into the numbers layer.
+        XCTAssertNil(manager.profiles[0].numberStats["A"])
+        XCTAssertEqual(manager.profiles[0].letterStats["A"]?.targetAttempts, 1)
+    }
+
+    func testProfileExportSchemaTwoBackupsUpgradeToSchemaThree() throws {
+        XCTAssertEqual(ProfileExportEnvelope.currentSchemaVersion, 3)
+
+        let data = try ProfileExportService.exportData(
+            profiles: [Profile(name: "Mila", avatarId: .lion)]
+        )
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json["schemaVersion"] = 2
+        let legacyData = try JSONSerialization.data(withJSONObject: json)
+
+        let decoded = try ProfileExportService.decodeImport(legacyData)
+        XCTAssertEqual(decoded.schemaVersion, 3, "Schema 2 imports upgrade in memory to schema 3")
+        XCTAssertEqual(decoded.profiles.first?.name, "Mila")
+
+        json["schemaVersion"] = 1
+        let unsupportedData = try JSONSerialization.data(withJSONObject: json)
+        XCTAssertThrowsError(try ProfileExportService.decodeImport(unsupportedData))
+    }
+
+    func testCloudBackupSchemaTwoPayloadStillDecodes() throws {
+        XCTAssertEqual(CloudBackupEnvelope.currentSchemaVersion, 3)
+
+        let settings = AppSettingsSnapshot(
+            musicEnabled: false,
+            sfxEnabled: true,
+            reduceMotionEnabled: false,
+            confettiEnabled: true,
+            personalizedCzechLettersEnabled: false,
+            parentGateMethod: .swipe,
+            remindersEnabled: false,
+            reminderHour: 17,
+            reminderMinute: 30,
+            lowercaseMode: .uppercaseOnly,
+            modifiedAt: Date(timeIntervalSince1970: 100)
+        )
+        var envelope = CloudBackupEnvelope(
+            savedAt: Date(timeIntervalSince1970: 200),
+            profiles: [Profile(name: "Mila", avatarId: .lion)],
+            settings: settings
+        )
+        envelope.schemaVersion = 2
+
+        let payload = try FirebaseBackupService.encodePayload(envelope)
+        let decoded = try FirebaseBackupService.decodePayload(payload)
+
+        XCTAssertEqual(decoded.schemaVersion, 2)
+        XCTAssertEqual(decoded.profiles.first?.name, "Mila")
+    }
+
+    func testCheckpointSlotsPerLayerAreIndependent() throws {
+        let suiteName = "NumbersModeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SessionCheckpointStore(defaults: defaults)
+        let profileId = UUID()
+
+        let letters = SessionCheckpointEnvelope(
+            profileId: profileId,
+            kind: .game,
+            learningLayer: .letters,
+            savedAt: Date()
+        )
+        let numbers = SessionCheckpointEnvelope(
+            profileId: profileId,
+            kind: .game,
+            learningLayer: .numbers,
+            savedAt: Date()
+        )
+
+        store.save(letters, layer: .letters)
+        store.save(numbers, layer: .numbers)
+        XCTAssertEqual(store.checkpoint(for: .letters)?.learningLayer, .letters)
+        XCTAssertEqual(store.checkpoint(for: .numbers)?.learningLayer, .numbers)
+
+        store.clear(profileId: profileId, layer: .numbers)
+        XCTAssertNil(store.checkpoint(for: .numbers))
+        XCTAssertEqual(
+            store.checkpoint(for: profileId, layer: .letters)?.profileId, profileId,
+            "Clearing the numbers slot must leave the letters checkpoint intact"
+        )
+    }
+}

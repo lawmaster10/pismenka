@@ -53,13 +53,25 @@ struct PismenkaApp: App {
                 .onAppear {
                     audioService.setPersonalizedCzechLettersEnabled(settings.personalizedCzechLettersEnabled)
                     firebaseBackupService.start(profileManager: profileManager, settings: settings)
-                    notificationService.updateDailyReminder(enabled: settings.remindersEnabled)
+                    notificationService.updateDailyReminder(
+                        enabled: settings.remindersEnabled,
+                        layer: settings.activeLearningLayer
+                    )
                 }
                 .onChange(of: settings.personalizedCzechLettersEnabled) { _, enabled in
                     audioService.setPersonalizedCzechLettersEnabled(enabled)
                 }
                 .onChange(of: settings.remindersEnabled) { _, enabled in
-                    notificationService.updateDailyReminder(enabled: enabled)
+                    notificationService.updateDailyReminder(
+                        enabled: enabled,
+                        layer: settings.activeLearningLayer
+                    )
+                }
+                .onChange(of: settings.activeLearningLayer) { _, layer in
+                    notificationService.updateDailyReminder(
+                        enabled: settings.remindersEnabled,
+                        layer: layer
+                    )
                 }
                 .onOpenURL { url in
                     _ = firebaseBackupService.handleOpenURL(url)
@@ -104,8 +116,8 @@ struct ContentView: View {
                         onProfileSelected: { profile in
                             handleProfileSelection(profile)
                         },
-                        onPracticeSelected: { profile, letter in
-                            startPractice(for: profile, letter: letter)
+                        onPracticeSelected: { profile, unitKey in
+                            startPractice(for: profile, unitKey: unitKey)
                         }
                     )
                     .transition(.opacity)
@@ -114,9 +126,10 @@ struct ContentView: View {
                     if let profile = selectedProfile {
                         CalibrationView(
                             profile: profile,
+                            layer: settings.activeLearningLayer,
                             restoredSnapshot: activeCalibrationSnapshot,
                             onComplete: {
-                                checkpointStore.clear(profileId: profile.id)
+                                checkpointStore.clear(profileId: profile.id, layer: settings.activeLearningLayer)
                                 activeCalibrationSnapshot = nil
                                 // Re-fetch (calibration just flipped the flag).
                                 let updated = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
@@ -124,7 +137,7 @@ struct ContentView: View {
                                 startGame(for: updated)
                             },
                             onHome: {
-                                checkpointStore.clear(profileId: profile.id)
+                                checkpointStore.clear(profileId: profile.id, layer: settings.activeLearningLayer)
                                 resetNavigationState()
                             }
                         )
@@ -141,17 +154,17 @@ struct ContentView: View {
                             profileManager: profileManager,
                             restoredSnapshot: activeGameSnapshot,
                             onExit: { summary in
-                                checkpointStore.clear(profileId: profile.id)
+                                checkpointStore.clear(profileId: profile.id, layer: plan.primaryLayer)
                                 activeGameSnapshot = nil
                                 lastSummary = summary
                                 currentScreen = .sessionEnd
                             },
                             onHome: {
-                                checkpointStore.clear(profileId: profile.id)
+                                checkpointStore.clear(profileId: profile.id, layer: plan.primaryLayer)
                                 resetNavigationState()
                             },
                             onWeeklyTestCompletedByParent: {
-                                checkpointStore.clear(profileId: profile.id)
+                                checkpointStore.clear(profileId: profile.id, layer: plan.primaryLayer)
                                 let updated = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
                                 startGame(for: updated)
                             }
@@ -213,11 +226,11 @@ struct ContentView: View {
 
     private func handleProfileSelection(_ profile: Profile) {
         selectedProfile = profile
-        if let checkpoint = checkpointStore.checkpoint(for: profile.id) {
+        if let checkpoint = checkpointStore.checkpoint(for: profile.id, layer: settings.activeLearningLayer) {
             restore(checkpoint: checkpoint, profile: profile)
             return
         }
-        if profile.hasCompletedCalibration {
+        if hasCompletedActiveLayerCalibration(profile) {
             withoutScreenAnimation {
                 startGame(for: profile)
             }
@@ -227,10 +240,17 @@ struct ContentView: View {
         }
     }
 
+    /// Calibration completion flag for the currently selected learning layer.
+    private func hasCompletedActiveLayerCalibration(_ profile: Profile) -> Bool {
+        settings.activeLearningLayer == .numbers
+            ? profile.hasCompletedNumberCalibration
+            : profile.hasCompletedCalibration
+    }
+
     private func restoreCheckpointIfPossible() {
         guard !shouldShowFirstLaunchOnboarding else { return }
         guard currentScreen == .profileSelect,
-              let checkpoint = checkpointStore.checkpoint,
+              let checkpoint = checkpointStore.checkpoint(for: settings.activeLearningLayer),
               let profile = profileManager.profiles.first(where: { $0.id == checkpoint.profileId }) else {
             return
         }
@@ -251,8 +271,11 @@ struct ContentView: View {
         selectedProfile = profile
         switch checkpoint.kind {
         case .calibration:
-            guard !profile.hasCompletedCalibration, let snapshot = checkpoint.calibration else {
-                checkpointStore.clear(profileId: profile.id)
+            let calibrationDone = checkpoint.learningLayer == .numbers
+                ? profile.hasCompletedNumberCalibration
+                : profile.hasCompletedCalibration
+            guard !calibrationDone, let snapshot = checkpoint.calibration else {
+                checkpointStore.clear(profileId: profile.id, layer: checkpoint.learningLayer)
                 return
             }
             activeCalibrationSnapshot = snapshot
@@ -260,7 +283,7 @@ struct ContentView: View {
             currentScreen = .calibration
         case .game:
             guard let plan = checkpoint.sessionPlan, let snapshot = checkpoint.game else {
-                checkpointStore.clear(profileId: profile.id)
+                checkpointStore.clear(profileId: profile.id, layer: checkpoint.learningLayer)
                 return
             }
             activeSessionPlan = plan
@@ -273,15 +296,24 @@ struct ContentView: View {
     /// Builds a fresh `SessionPlan` preview and pushes the game screen. The
     /// day-streak / focus-day state is committed only after the first answer.
     private func startGame(for profile: Profile) {
-        let plan = profileManager.previewSessionPlan(profileId: profile.id, lowercaseMode: settings.lowercaseMode)
+        let plan = profileManager.previewSessionPlan(
+            profileId: profile.id,
+            lowercaseMode: settings.lowercaseMode,
+            layer: settings.activeLearningLayer
+        )
         selectedProfile = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
         activeSessionPlan = plan
         activeGameSnapshot = nil
         currentScreen = .game
     }
 
-    private func startPractice(for profile: Profile, letter: String) {
-        let plan = profileManager.startPracticeSession(profileId: profile.id, letter: letter)
+    /// `unitKey` is a letter or a number string depending on the active
+    /// learning layer — the dashboards only hand out keys matching the layer
+    /// they were opened for.
+    private func startPractice(for profile: Profile, unitKey: String) {
+        let plan = settings.activeLearningLayer == .numbers
+            ? profileManager.startPracticeSession(profileId: profile.id, number: unitKey)
+            : profileManager.startPracticeSession(profileId: profile.id, letter: unitKey)
         let updated = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
         selectedProfile = updated
         activeSessionPlan = plan

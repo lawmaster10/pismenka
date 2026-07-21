@@ -23,6 +23,10 @@ struct CalibrationView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     let profile: Profile
+    /// Which learning layer this calibration measures. `.letters` runs the
+    /// classic letter pool; `.numbers` runs `NumberDifficulty.calibrationPool`
+    /// (1…10) and flips `hasCompletedNumberCalibration` on completion.
+    let layer: LearningLayer
     let restoredSnapshot: CalibrationSnapshot?
     let onComplete: () -> Void
     let onHome: () -> Void
@@ -42,14 +46,39 @@ struct CalibrationView: View {
 
     init(
         profile: Profile,
+        layer: LearningLayer = .letters,
         restoredSnapshot: CalibrationSnapshot? = nil,
         onComplete: @escaping () -> Void,
         onHome: @escaping () -> Void
     ) {
         self.profile = profile
+        self.layer = layer
         self.restoredSnapshot = restoredSnapshot
         self.onComplete = onComplete
         self.onHome = onHome
+    }
+
+    private var isNumbersLayer: Bool { layer == .numbers }
+
+    private var hasCompletedLayerCalibration: Bool {
+        isNumbersLayer ? profile.hasCompletedNumberCalibration : profile.hasCompletedCalibration
+    }
+
+    private var layerCalibrationPool: [String] {
+        isNumbersLayer
+            ? NumberDifficulty.calibrationPool()
+            : LetterDifficulty.calibrationPool(
+                for: profile.language,
+                nameLetter: profile.firstNameLetterKey
+            )
+    }
+
+    private func playTargetAudio() {
+        if isNumbersLayer {
+            audioService.playNumber(targetLetter, language: profile.language)
+        } else {
+            audioService.playLetter(targetLetter, language: profile.language)
+        }
     }
 
     private var totalRounds: Int { schedule.count }
@@ -191,7 +220,7 @@ struct CalibrationView: View {
                     systemImage: "play.fill",
                     action: {
                         HapticService.shared.tap()
-                        audioService.playLetter(targetLetter, language: profile.language)
+                        playTargetAudio()
                     },
                     size: 64,
                     style: .leaf,
@@ -215,7 +244,7 @@ struct CalibrationView: View {
         HapticService.shared.tap()
         isCompleting = true
         delayTask?.cancel()
-        checkpointStore.clear(profileId: profile.id)
+        checkpointStore.clear(profileId: profile.id, layer: layer)
         onHome()
     }
 
@@ -249,8 +278,12 @@ struct CalibrationView: View {
                 action: {
                     HapticService.shared.tap()
                     isCompleting = true
-                    checkpointStore.clear(profileId: profile.id)
-                    profileManager.markCalibrationComplete(profileId: profile.id)
+                    checkpointStore.clear(profileId: profile.id, layer: layer)
+                    if isNumbersLayer {
+                        profileManager.markNumberCalibrationComplete(profileId: profile.id)
+                    } else {
+                        profileManager.markCalibrationComplete(profileId: profile.id)
+                    }
                     onComplete()
                 },
                 size: 90,
@@ -278,7 +311,7 @@ struct CalibrationView: View {
     private func restoreOrBuildSchedule() {
         if let restoredSnapshot {
             guard isValidRestoredSnapshot(restoredSnapshot) else {
-                checkpointStore.clear(profileId: profile.id)
+                checkpointStore.clear(profileId: profile.id, layer: layer)
                 buildSchedule()
                 return
             }
@@ -297,7 +330,8 @@ struct CalibrationView: View {
     }
 
     private func isValidRestoredSnapshot(_ snapshot: CalibrationSnapshot) -> Bool {
-        guard !snapshot.schedule.isEmpty,
+        guard snapshot.learningLayer == layer,
+              !snapshot.schedule.isEmpty,
               snapshot.currentIndex >= 0,
               snapshot.currentIndex <= snapshot.schedule.count,
               snapshot.roundsAnswered >= 0,
@@ -305,10 +339,7 @@ struct CalibrationView: View {
             return false
         }
 
-        let pool = Set(LetterDifficulty.calibrationPool(
-            for: profile.language,
-            nameLetter: profile.firstNameLetterKey
-        ))
+        let pool = Set(layerCalibrationPool)
         guard snapshot.schedule.allSatisfy({ pool.contains($0) }) else { return false }
 
         if snapshot.showFinale || snapshot.currentIndex == snapshot.schedule.count {
@@ -324,14 +355,13 @@ struct CalibrationView: View {
     }
 
     private func buildSchedule() {
-        let pool = LetterDifficulty.calibrationPool(
-            for: profile.language,
-            nameLetter: profile.firstNameLetterKey
-        )
-        let nameLetter = LetterDifficulty.nameLetterForCalibration(
-            profile.firstNameLetterKey,
-            language: profile.language
-        )
+        let pool = layerCalibrationPool
+        let nameLetter = isNumbersLayer
+            ? nil
+            : LetterDifficulty.nameLetterForCalibration(
+                profile.firstNameLetterKey,
+                language: profile.language
+            )
 
         // Every pool letter appears exactly twice. With the standard 10-letter
         // pool that's 20 rounds; when the child's name letter adds an 11th,
@@ -370,8 +400,13 @@ struct CalibrationView: View {
     }
 
     private func buildOptions(target: String, pool: [String]) -> [String] {
-        let confusing = LetterDifficulty.visuallyConfusingPairs[target] ?? []
-        let candidates = pool.filter { $0 != target && !confusing.contains($0) }
+        let candidates: [String]
+        if isNumbersLayer {
+            candidates = pool.filter { $0 != target && !NumberDifficulty.isHardConfusable(target, $0) }
+        } else {
+            let confusing = LetterDifficulty.visuallyConfusingPairs[target] ?? []
+            candidates = pool.filter { $0 != target && !confusing.contains($0) }
+        }
         var distractors = Array(candidates.shuffled().prefix(3))
         if distractors.count < 3 {
             // Top up from the full pool ignoring the confusing filter.
@@ -399,14 +434,29 @@ struct CalibrationView: View {
             if settings.sfxEnabled { audioService.playWrong() }
         }
 
-        profileManager.recordAnswer(
-            profileId: profile.id,
-            letter: targetLetter,
-            wasCorrect: isCorrect,
-            asTarget: true
-        )
-        for shown in displayedLetters where shown != targetLetter {
-            profileManager.recordExposure(profileId: profile.id, letter: shown)
+        if isNumbersLayer {
+            profileManager.recordAnswer(
+                profileId: profile.id,
+                target: .number(targetLetter),
+                wasCorrect: isCorrect,
+                asTarget: true,
+                selectedWrongTarget: isCorrect ? nil : .number(letter),
+                optionsShown: displayedLetters.map { .number($0) },
+                activityKind: .numberRecognition
+            )
+            for shown in displayedLetters where shown != targetLetter {
+                profileManager.recordExposure(profileId: profile.id, target: .number(shown))
+            }
+        } else {
+            profileManager.recordAnswer(
+                profileId: profile.id,
+                letter: targetLetter,
+                wasCorrect: isCorrect,
+                asTarget: true
+            )
+            for shown in displayedLetters where shown != targetLetter {
+                profileManager.recordExposure(profileId: profile.id, letter: shown)
+            }
         }
 
         roundsAnswered += 1
@@ -442,11 +492,7 @@ struct CalibrationView: View {
             withAnimation { showFinale = true }
             return
         }
-        let pool = LetterDifficulty.calibrationPool(
-            for: profile.language,
-            nameLetter: profile.firstNameLetterKey
-        )
-        displayedLetters = buildOptions(target: schedule[currentIndex], pool: pool)
+        displayedLetters = buildOptions(target: schedule[currentIndex], pool: layerCalibrationPool)
         persistCalibrationCheckpoint()
         playPrompt(after: 0.3)
     }
@@ -472,14 +518,18 @@ struct CalibrationView: View {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 if settings.sfxEnabled {
-                    audioService.playFindPrompt(letter: targetLetter, language: profile.language)
+                    if isNumbersLayer {
+                        audioService.playNumber(targetLetter, language: profile.language)
+                    } else {
+                        audioService.playFindPrompt(letter: targetLetter, language: profile.language)
+                    }
                 }
             }
         }
     }
 
     private func persistCalibrationCheckpoint(advanceToNextRoundOnRestore: Bool = false) {
-        guard !profile.hasCompletedCalibration, !isCompleting else { return }
+        guard !hasCompletedLayerCalibration, !isCompleting else { return }
         profileManager.flushPendingSave()
         let snapshot = CalibrationSnapshot(
             schedule: schedule,
@@ -488,14 +538,19 @@ struct CalibrationView: View {
             roundsAnswered: roundsAnswered,
             showIntro: showIntro,
             showFinale: showFinale,
-            advanceToNextRoundOnRestore: advanceToNextRoundOnRestore
+            advanceToNextRoundOnRestore: advanceToNextRoundOnRestore,
+            learningLayer: layer
         )
-        checkpointStore.save(SessionCheckpointEnvelope(
-            profileId: profile.id,
-            kind: .calibration,
-            savedAt: Date(),
-            calibration: snapshot
-        ))
+        checkpointStore.save(
+            SessionCheckpointEnvelope(
+                profileId: profile.id,
+                kind: .calibration,
+                learningLayer: layer,
+                savedAt: Date(),
+                calibration: snapshot
+            ),
+            layer: layer
+        )
     }
 }
 

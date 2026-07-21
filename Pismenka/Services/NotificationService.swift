@@ -22,7 +22,9 @@ final class NotificationService: ObservableObject {
         self.center = center
     }
 
-    func updateDailyReminder(enabled: Bool) {
+    /// `layer` controls the reminder copy ("letter" vs "number") so the
+    /// notification matches the mode the family is currently playing.
+    func updateDailyReminder(enabled: Bool, layer: LearningLayer = .letters) {
         guard enabled else {
             center.removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
             return
@@ -31,17 +33,17 @@ final class NotificationService: ObservableObject {
         center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
             guard granted else { return }
             Task { @MainActor in
-                self?.scheduleDailyReminder()
+                self?.scheduleDailyReminder(layer: layer)
             }
         }
     }
 
-    private func scheduleDailyReminder() {
+    private func scheduleDailyReminder(layer: LearningLayer) {
         center.removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
 
         let content = UNMutableNotificationContent()
         content.title = "Písmenka"
-        content.body = "Ready for today’s letter?"
+        content.body = layer == .numbers ? "Ready for today’s number?" : "Ready for today’s letter?"
         content.sound = .default
 
         var calendar = Calendar.autoupdatingCurrent

@@ -167,6 +167,36 @@ struct ProfileLearningSnapshot: Equatable {
     /// Total letter count for the active language; useful when consumers want
     /// to compute "X out of N" without re-resolving the language alphabet.
     let totalLettersInLanguage: Int
+
+    /// Numbers the game should treat as "known" for review/distractor purposes.
+    let knownNumbers: Set<String>
+
+    /// Stronger evidence tier for number hard distractor roles.
+    let strongKnownNumbers: Set<String>
+
+    /// Numbers whose stat currently satisfies focus graduation.
+    let currentlyMasteredNumbers: Set<String>
+
+    /// Lifetime number mastery set for normal play.
+    let everMasteredNumbers: Set<String>
+
+    /// Numbers with target attempts that aren't yet known.
+    let learningNumbers: Set<String>
+
+    /// Numbers never intentionally introduced in the curriculum pool.
+    let unseenNumbers: Set<String>
+
+    /// Ever-mastered numbers that have slipped out of `knownNumbers`.
+    let recentlySlippedNumbers: Set<String>
+
+    /// Difficulty band the numbers engine should use for this session.
+    let numberInstructionalBand: NumberInstructionalBand
+
+    /// Persisted highest-ever number instructional band.
+    let highestNumberBandEver: NumberInstructionalBand
+
+    /// Total number count in the curriculum (0…100).
+    let totalNumbersInCurriculum: Int
 }
 
 /// Parent-facing answer to "what does my child know?".
@@ -196,6 +226,22 @@ struct ParentLetterKnowledgeSummary: Equatable {
     var needsPracticeCount: Int { needsPracticeLetters.count }
     var notIntroducedCount: Int { notIntroducedLetters.count }
     var recentlySlippedCount: Int { recentlySlippedLetters.count }
+}
+
+/// Parent-facing answer to "what numbers does my child know?".
+struct ParentNumberKnowledgeSummary: Equatable {
+    let confidentlyKnownNumbers: Set<String>
+    let likelyKnownNumbers: Set<String>
+    let needsPracticeNumbers: Set<String>
+    let notIntroducedNumbers: Set<String>
+    let recentlySlippedNumbers: Set<String>
+    let totalNumbers: Int
+
+    var confidentlyKnownCount: Int { confidentlyKnownNumbers.count }
+    var likelyKnownCount: Int { likelyKnownNumbers.count }
+    var needsPracticeCount: Int { needsPracticeNumbers.count }
+    var notIntroducedCount: Int { notIntroducedNumbers.count }
+    var recentlySlippedCount: Int { recentlySlippedNumbers.count }
 }
 
 extension ProfileLearningSnapshot {
@@ -255,6 +301,38 @@ extension ProfileLearningSnapshot {
             notIntroducedLetters: notIntroduced,
             recentlySlippedLetters: recentlySlippedInAlphabet,
             totalLetters: alphabetLetters.count
+        )
+    }
+
+    /// Resolve the 4-bucket parent summary for a numbers curriculum pool.
+    func parentNumberKnowledgeSummary(pool: Set<String>) -> ParentNumberKnowledgeSummary {
+        let knownInPool = knownNumbers.intersection(pool)
+        let everMasteredInPool = everMasteredNumbers.intersection(pool)
+        let recentlySlippedInPool = recentlySlippedNumbers.intersection(pool)
+
+        let confidentlyKnown = strongKnownNumbers
+            .union(currentlyMasteredNumbers)
+            .union(everMasteredInPool)
+            .intersection(knownInPool)
+
+        let likelyKnown = knownInPool
+            .subtracting(confidentlyKnown)
+            .union(recentlySlippedInPool)
+
+        let notIntroduced = unseenNumbers.intersection(pool)
+
+        let needsPractice = pool
+            .subtracting(confidentlyKnown)
+            .subtracting(likelyKnown)
+            .subtracting(notIntroduced)
+
+        return ParentNumberKnowledgeSummary(
+            confidentlyKnownNumbers: confidentlyKnown,
+            likelyKnownNumbers: likelyKnown,
+            needsPracticeNumbers: needsPractice,
+            notIntroducedNumbers: notIntroduced,
+            recentlySlippedNumbers: recentlySlippedInPool,
+            totalNumbers: pool.count
         )
     }
 }

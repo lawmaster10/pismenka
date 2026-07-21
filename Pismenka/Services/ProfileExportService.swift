@@ -8,7 +8,7 @@
 import Foundation
 
 struct ProfileExportEnvelope: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int = ProfileExportEnvelope.currentSchemaVersion
     var exportedAt: Date = Date()
@@ -51,8 +51,16 @@ enum ProfileExportService {
 
     static func decodeImport(_ data: Data) throws -> ProfileExportEnvelope {
         guard data.count <= maxImportBytes else { throw ProfileExportError.payloadTooLarge }
-        let envelope = try JSONDecoder().decode(ProfileExportEnvelope.self, from: data)
-        guard envelope.schemaVersion == ProfileExportEnvelope.currentSchemaVersion else {
+        var envelope = try JSONDecoder().decode(ProfileExportEnvelope.self, from: data)
+        switch envelope.schemaVersion {
+        case ProfileExportEnvelope.currentSchemaVersion:
+            break
+        case 2:
+            // Schema 2 predates the numbers layer; profiles decode with number
+            // defaults already, so a v2 backup is valid v3 data. Upgrade in
+            // memory so re-exports never write schema 2.
+            envelope.schemaVersion = ProfileExportEnvelope.currentSchemaVersion
+        default:
             throw ProfileExportError.unsupportedSchema
         }
         guard envelope.profiles.count <= maxProfiles else { throw ProfileExportError.tooManyProfiles }

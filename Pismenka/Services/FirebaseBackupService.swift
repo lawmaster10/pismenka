@@ -37,7 +37,7 @@ enum FirebaseBootstrap {
 }
 
 struct CloudBackupEnvelope: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int = CloudBackupEnvelope.currentSchemaVersion
     var savedAt: Date = Date()
@@ -420,8 +420,16 @@ final class FirebaseBackupService: ObservableObject {
                 return
             }
 
-            let envelope = try Self.decodePayload(payload)
-            guard envelope.schemaVersion == CloudBackupEnvelope.currentSchemaVersion else {
+            var envelope = try Self.decodePayload(payload)
+            switch envelope.schemaVersion {
+            case CloudBackupEnvelope.currentSchemaVersion:
+                break
+            case 2:
+                // Schema 2 predates the numbers layer; profiles decode with
+                // number defaults already. Upgrade in memory — any subsequent
+                // backup writes schema 3, never 2.
+                envelope.schemaVersion = CloudBackupEnvelope.currentSchemaVersion
+            default:
                 status = .failed("This cloud backup was made by an unsupported version.")
                 return
             }

@@ -86,6 +86,8 @@ enum SyllableCurriculum {
                 switch target {
                 case .letter(let letter):
                     guard profile.everMasteredLetters.contains(letter) else { return false }
+                case .number(let number):
+                    guard profile.everMasteredNumbers.contains(number) else { return false }
                 case .syllable(let syllable):
                     guard profile.knownSyllables.contains(syllable) else { return false }
                 case .word(let word):

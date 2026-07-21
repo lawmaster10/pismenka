@@ -1,18 +1,19 @@
 # Písmenka
 
-Písmenka is an adaptive pre-reading game for toddlers, currently focused 100% on letters. Each child profile learns in English or Czech, hears a bundled letter prompt, and picks the matching letter from a playful grid.
+Písmenka is an adaptive early-learning game for toddlers with two modes: **Letters** and **Numbers**. Each child profile learns in English or Czech, hears a bundled prompt, and picks the matching letter or number from a playful grid.
 
 Gameplay and learning are offline. Optional Apple/Google Firebase backup is parent-enabled only.
 
 ## Current Scope
 
-- English and Czech letter recognition
+- English and Czech letter recognition, plus a numbers mode (0–100 recognition) as a peer learning layer
 - First-launch language choice (Czech by default) with spoken previews, then optional Apple/Google backup
-- One-time per-profile calibration
-- Adaptive 25-answer letter sessions with a visible Winner goal
-- Retention progress check after every six completed 25-answer sessions
-- Parent dashboard, profile editing, per-letter overrides, and progress reset controls
-- Bundled letter audio, game SFX, and optional personalized Czech letter prompts
+- One-time per-profile calibration (letters and numbers each have their own)
+- Adaptive 25-answer sessions with a visible Winner goal, in both modes
+- Retention progress check after every six completed 25-answer sessions, per mode
+- A shared day streak across modes, with independent per-mode progress
+- Parent dashboards for both modes, profile editing, per-letter overrides, and progress reset controls
+- Bundled letter and number audio, game SFX, and optional personalized Czech letter prompts
 
 Syllable and word-reading models remain in the codebase as dormant scaffolding. They are not scheduled, unlocked, shown, or shipped as audio in this release.
 

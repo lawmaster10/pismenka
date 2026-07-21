@@ -210,7 +210,7 @@ struct SessionEndView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Letters mastered".uppercased())
+                    Text(masteredLabel.uppercased())
                         .brandEyebrowStyle()
                     Spacer()
                     Text("\(summary.letterMasteredCount) / \(summary.totalLetters)")
@@ -222,14 +222,22 @@ struct SessionEndView: View {
                     progress: Double(summary.letterMasteredCount) /
                         Double(max(summary.nextLevelThreshold, summary.totalLetters))
                 )
-                Text("\(summary.newLevel.badgeEmoji)  \(summary.newLevel.displayName)")
-                    .font(.brandBody(13, weight: .bold))
-                    .foregroundColor(.slate500)
+                // The alphabet-level badge is letters-only; numbers sessions
+                // have their own instructional band that isn't a trophy line.
+                if summary.primaryLayer != .numbers {
+                    Text("\(summary.newLevel.badgeEmoji)  \(summary.newLevel.displayName)")
+                        .font(.brandBody(13, weight: .bold))
+                        .foregroundColor(.slate500)
+                }
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
         .softCard()
+    }
+
+    private var masteredLabel: String {
+        summary.primaryLayer == .numbers ? "Numbers mastered" : "Letters mastered"
     }
 
     private func stampHint(for stamp: DailyStamp) -> String {

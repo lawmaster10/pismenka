@@ -255,6 +255,12 @@ struct LetterButton: View {
         if letter.hasSuffix("|lower") {
             return String(letter.dropLast("|lower".count)).lowercased()
         }
+        // Bare digit keys ("5", "26", "100") are number glyphs in the grid —
+        // never run them through FocusTarget(storageKey:), which treats any
+        // single character as a letter (so "5" would become .letter("5")).
+        if letter.unicodeScalars.allSatisfy({ CharacterSet.decimalDigits.contains($0) }) {
+            return letter
+        }
         if let target = FocusTarget(storageKey: letter) {
             return target.displayText
         }

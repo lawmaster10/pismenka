@@ -314,6 +314,12 @@ struct SessionSummary: Equatable {
     /// any positive value here means we silently violated the "one new
     /// letter per day" principle and is worth surfacing for debugging.
     var unintroducedExposures: Int
+
+    /// Which learning layer the session ran on. Lets the end screen use
+    /// layer-appropriate copy ("Numbers mastered" vs "Letters mastered").
+    /// For numbers sessions, `letterMasteredCount` / `totalLetters` carry
+    /// the number counts over the introduced pool.
+    var primaryLayer: LearningLayer = .letters
 }
 
 // MARK: - Distractor tiers
@@ -703,6 +709,15 @@ final class AdaptiveGameState: ObservableObject {
     /// harder distractor and case behavior.
     private var frozenLetterOptionsPerRound: Int = 4
 
+    /// Numbers-layer difficulty band frozen at session start. Parallel of
+    /// `instructionalBand`; drives the number confusion policy and never
+    /// derives from `AlphabetLevel`.
+    private var numberBand: NumberInstructionalBand = .beginner
+
+    /// Base number-grid size frozen at session start; parallel of
+    /// `frozenLetterOptionsPerRound` for `plan.primaryLayer == .numbers`.
+    private var frozenNumberOptionsPerRound: Int = 4
+
     /// Audio-filtered word pool frozen for word-reading sessions. Every word
     /// option in the session must come from this pool.
     private var sessionPlayableWords: [WordUnit] = []
@@ -838,6 +853,8 @@ final class AdaptiveGameState: ObservableObject {
         let base: Int
         if plan.primaryLayer == .syllables || plan.primaryLayer == .words {
             base = 4
+        } else if plan.primaryLayer == .numbers {
+            base = frozenNumberOptionsPerRound
         } else {
             base = frozenLetterOptionsPerRound
         }
@@ -876,6 +893,46 @@ final class AdaptiveGameState: ObservableObject {
         return min(base, 4)
     }
 
+    /// Numbers twin of `resolvedLetterOptionCount`: clamps the frozen number
+    /// grid per target strength so weak / slipped / focus targets stay at 4.
+    private func resolvedNumberOptionCount(
+        for target: String,
+        profile: Profile,
+        assessmentBucket: WeeklyAssessmentBucket? = nil,
+        forceFour: Bool = false
+    ) -> Int {
+        let base = optionsPerRound
+        guard !forceFour else { return min(base, 4) }
+        switch assessmentBucket {
+        case .cohort, .slipped, .emerging, .parentMarked:
+            return min(base, 4)
+        case .solid:
+            return min(base, 6)
+        case .fluent, .none:
+            break
+        }
+        guard profile.knownNumbers.contains(target),
+              !profile.snapshot.recentlySlippedNumbers.contains(target),
+              target != activeNumberDrillFocus(for: profile) else {
+            return min(base, 4)
+        }
+        guard let stat = profile.numberStats[target] else { return min(base, 4) }
+        if stat.isFluentKnown {
+            return base
+        }
+        if stat.isStrongKnown {
+            return min(base, 6)
+        }
+        return min(base, 4)
+    }
+
+    /// Numbers twin of `activeDrillFocus(for:)` — the spotlight/persisted
+    /// number the drill phase should teach; `nil` on review-test days.
+    private func activeNumberDrillFocus(for profile: Profile) -> String? {
+        guard plan.dailyPracticeKind != .reviewTest else { return nil }
+        return plan.dailySpotlightLetter ?? profile.currentFocusNumber
+    }
+
     // MARK: Init
 
     init(
@@ -898,13 +955,26 @@ final class AdaptiveGameState: ObservableObject {
         self.frozenLetterOptionsPerRound = canApplySnapshot
             ? (restoredSnapshot?.letterOptionsPerRound ?? profile.letterOptionsPerRound)
             : profile.letterOptionsPerRound
+        self.numberBand = canApplySnapshot
+            ? (restoredSnapshot?.numberBand ?? learningSnapshot.numberInstructionalBand)
+            : learningSnapshot.numberInstructionalBand
+        self.frozenNumberOptionsPerRound = canApplySnapshot
+            ? (restoredSnapshot?.numberOptionsPerRound ?? profile.numberOptionsPerRound)
+            : profile.numberOptionsPerRound
         // Persist the freshly-frozen grid size so the next session can apply
         // ±2 hysteresis around it. Idempotent inside ProfileManager — only
         // writes when the value actually changes.
-        profileManager.recordSessionFrozenGrid(
-            profileId: profile.id,
-            value: self.frozenLetterOptionsPerRound
-        )
+        if plan.primaryLayer == .numbers {
+            profileManager.recordSessionFrozenNumberGrid(
+                profileId: profile.id,
+                value: self.frozenNumberOptionsPerRound
+            )
+        } else {
+            profileManager.recordSessionFrozenGrid(
+                profileId: profile.id,
+                value: self.frozenLetterOptionsPerRound
+            )
+        }
         self.sessionPlayableWords = []
         if canApplySnapshot, let restoredPlayableWords = restoredSnapshot?.sessionPlayableWords {
             self.sessionPlayableWords = restoredPlayableWords
@@ -920,7 +990,9 @@ final class AdaptiveGameState: ObservableObject {
         // introduction-day hard cap ("never more than 10 asks of one letter")
         // holds across multiple sittings on the same local day, not just
         // within one app sitting.
-        self.sessionTargetCounts = profile.dailyTargetAskCounts(on: LocalDay.today())
+        self.sessionTargetCounts = plan.primaryLayer == .numbers
+            ? profile.numberDailyTargetAskCounts(on: LocalDay.today())
+            : profile.dailyTargetAskCounts(on: LocalDay.today())
         if let restoredSnapshot,
            restoredSnapshot.profileId == profile.id,
            restoredSnapshot.plan == plan {
@@ -946,6 +1018,13 @@ final class AdaptiveGameState: ObservableObject {
                 assertionFailure("Reading-layer plans must not promise warm-up until the engine supports it.")
             }
             self.phase = plan.activityKind == .wordBuilding ? .wordBuilding : .wordReading
+        } else if plan.primaryLayer == .numbers {
+            let knownCount = profile.knownNumbers.count
+            if plan.warmupLength == 0 || knownCount < 3 {
+                self.phase = activeNumberDrillFocus(for: profile) == nil ? .plainReview : .drill
+            } else {
+                self.phase = .warmup
+            }
         } else {
             // If the child has fewer than ~3 known letters, skip warm-up entirely
             // so we don't try to draw distractors from an empty pool.
@@ -1040,6 +1119,8 @@ final class AdaptiveGameState: ObservableObject {
             currentRoundPhaseOverride: currentRoundPhaseOverride,
             instructionalBand: instructionalBand,
             letterOptionsPerRound: frozenLetterOptionsPerRound,
+            numberBand: numberBand,
+            numberOptionsPerRound: frozenNumberOptionsPerRound,
             sessionPlayableWords: sessionPlayableWords,
             liveDifficulty: liveDifficulty,
             recentRoundCorrectness: recentRoundCorrectness,
@@ -1111,6 +1192,12 @@ final class AdaptiveGameState: ObservableObject {
         if let restoredLetterOptions = snapshot.letterOptionsPerRound {
             frozenLetterOptionsPerRound = restoredLetterOptions
         }
+        if let restoredNumberBand = snapshot.numberBand {
+            numberBand = restoredNumberBand
+        }
+        if let restoredNumberOptions = snapshot.numberOptionsPerRound {
+            frozenNumberOptionsPerRound = restoredNumberOptions
+        }
         if let restoredPlayableWords = snapshot.sessionPlayableWords {
             sessionPlayableWords = restoredPlayableWords
         }
@@ -1165,6 +1252,11 @@ final class AdaptiveGameState: ObservableObject {
             return
         }
         syncCorrectPositionSlots()
+
+        if plan.primaryLayer == .numbers {
+            setupNumberRound(profile: profile)
+            return
+        }
 
         if case .extraPractice(let letter) = plan.mode {
             phase = .plainReview
@@ -1311,6 +1403,302 @@ final class AdaptiveGameState: ObservableObject {
         advanceRescueQueue()
     }
 
+    // MARK: - Numbers round pipeline
+
+    /// Numbers twin of the letters flow inside `setupNewRound()`. Shares the
+    /// rescue queue, difficulty governor, position rotation, and target-cap
+    /// machinery (all key-agnostic); only target/distractor selection is
+    /// number-specific.
+    private func setupNumberRound(profile: Profile) {
+        if case .extraPractice(let number) = plan.mode {
+            phase = .plainReview
+            teachingMode = .normal
+            effectiveScaffoldingLevel = 0
+            previousTarget = targetLetter
+            currentRoundPhaseOverride = nil
+            currentRoundIsRescue = false
+            currentRescueDifficulty = nil
+            currentRoundPlanReason = nil
+            roundStartedAt = nil
+            roundReplayCount = 0
+            lastMistakeType = nil
+            lastResponseTime = nil
+            currentRoundCameoLetter = nil
+            buildNumberRound(profile: profile, forcedTarget: number)
+            currentRoundIntent = .extraPractice
+            currentRoundPlanReason = makeRoundPlanReason(profile: profile)
+            rememberTargetLetter()
+            return
+        }
+
+        // Phase transitions. Numbers use warmup → drill/plainReview only; no
+        // maintenance or reading phases.
+        if phase == .warmup, roundsThisSession >= warmupLength {
+            phase = activeNumberDrillFocus(for: profile) == nil ? .plainReview : .drill
+        }
+        if phase == .drill, activeNumberDrillFocus(for: profile) == nil {
+            phase = .plainReview
+        }
+
+        teachingMode = resolveNumberTeachingMode(profile: profile)
+        effectiveScaffoldingLevel = teachingMode == .scaffolded
+            ? 3
+            : max(0, plan.focusScaffoldingLevel)
+        previousTarget = targetLetter
+        currentRoundPhaseOverride = nil
+        roundStartedAt = nil
+        roundReplayCount = 0
+        lastMistakeType = nil
+        lastResponseTime = nil
+        currentRoundCameoLetter = nil
+        currentRoundPlanReason = nil
+        currentPlainReviewIntentOverride = nil
+
+        if liveDifficulty == .easierUntilStreak {
+            prioritizeRescueQueueForGovernor()
+        }
+
+        if let dueRescue = dequeueDueRescue() {
+            currentRoundIsRescue = true
+            currentRescueDifficulty = dueRescue.difficulty
+            currentRoundPhaseOverride = .rescue
+            buildNumberRound(profile: profile, forcedTarget: dueRescue.letterKey, rescue: dueRescue.difficulty)
+            currentRoundIntent = .rescue
+        } else {
+            currentRoundIsRescue = false
+            currentRescueDifficulty = nil
+            switch phase {
+            case .warmup:
+                buildNumberRound(profile: profile, warmup: true)
+                currentRoundIntent = governedIntent(.warmupConfidence)
+            case .drill:
+                buildNumberRound(profile: profile)
+                if let focus = activeNumberDrillFocus(for: profile), targetLetter == focus {
+                    currentRoundIntent = governedIntent(.focusTarget)
+                } else {
+                    currentRoundIntent = governedIntent(.focusDistractorExposure)
+                }
+            default:
+                buildNumberRound(profile: profile)
+                let intent = currentPlainReviewIntentOverride
+                    ?? (plan.dailyPracticeKind == .reviewTest ? .weeklyAssessment : .staleReview)
+                currentRoundIntent = governedIntent(intent)
+            }
+        }
+
+        currentRoundPlanReason = makeRoundPlanReason(profile: profile)
+        rememberTargetLetter()
+        advanceRescueQueue()
+    }
+
+    private func resolveNumberTeachingMode(profile: Profile) -> FocusTeachingMode {
+        guard activeNumberDrillFocus(for: profile) != nil else { return .normal }
+        return profile.numberFocusActiveDays <= 2 ? .scaffolded : .normal
+    }
+
+    private func uniqueEligibleNumberTargets(_ candidates: [String]) -> [String] {
+        var seen: Set<String> = []
+        return candidates.compactMap { candidate in
+            guard NumberDifficulty.isEligibleTarget(candidate), !seen.contains(candidate) else {
+                return nil
+            }
+            seen.insert(candidate)
+            return candidate
+        }
+    }
+
+    private func preferNotRecentlyTargetedNumber(_ candidates: [String]) -> String? {
+        let eligible = uniqueEligibleNumberTargets(candidates)
+        guard !eligible.isEmpty else { return nil }
+        let recent = Set(recentTargetLetters)
+        return eligible.first(where: { !recent.contains($0) && $0 != previousTarget })
+            ?? eligible.first(where: { !recent.contains($0) })
+            ?? eligible.first(where: { $0 != previousTarget })
+            ?? eligible.first
+    }
+
+    /// Introduced numbers the child hasn't yet proven, ordered by scheduler
+    /// review priority. Numbers twin of `introductionNeedsWorkCandidates`.
+    private func numbersNeedingWork(profile: Profile, excluding focus: String?) -> [String] {
+        NumberDifficulty.playablePool(introduced: profile.introducedNumbers)
+            .filter { $0 != focus }
+            .filter { number in
+                guard let stat = profile.numberStats[number] else { return true }
+                if stat.targetAttempts < 5 { return true }
+                if stat.recentAccuracy(window: 5) < 0.75 { return true }
+                if stat.isReviewDue() { return true }
+                return !stat.isStrongKnown
+                    && !stat.isFocusGraduated
+                    && !profile.everMasteredNumbers.contains(number)
+            }
+            .sorted {
+                (profile.numberStats[$0]?.reviewPriority ?? 1)
+                    > (profile.numberStats[$1]?.reviewPriority ?? 1)
+            }
+    }
+
+    private func chooseWeeklyNumberAssessmentTarget(profile: Profile) -> String? {
+        guard let assessment = profile.activeWeeklyNumberAssessment,
+              !assessment.isCompleted else {
+            return nil
+        }
+        let candidates = assessment.lettersNeedingEvidence()
+            .filter { plan.weeklyReviewLetters.contains($0) }
+        guard !candidates.isEmpty else { return nil }
+        let ordered = candidates.sorted { lhs, rhs in
+            let left = assessment.result(for: lhs)
+            let right = assessment.result(for: rhs)
+            let leftRemaining = max(1, left.attemptCap - left.independentAttempts)
+            let rightRemaining = max(1, right.attemptCap - right.independentAttempts)
+            if leftRemaining != rightRemaining { return leftRemaining > rightRemaining }
+            return (Int(lhs) ?? 0) < (Int(rhs) ?? 0)
+        }
+        return preferNotRecentlyTargetedNumber(ordered) ?? ordered.first
+    }
+
+    /// Confusion policy for a numbers round. Rescue and governor-eased rounds
+    /// always fall back to `.avoid` (which blocks digit transposes and
+    /// lookalikes by construction); otherwise the frozen
+    /// `NumberInstructionalBand` drives the stage, gentled for the current
+    /// focus while it is still scaffolded.
+    private func numberConfusionPolicy(
+        for target: String,
+        profile: Profile,
+        rescue: RescueDifficulty? = nil
+    ) -> NumberDifficulty.ConfusionPolicy {
+        if rescue != nil || liveDifficulty == .easierUntilStreak {
+            return .avoid
+        }
+        let bandPolicy = numberBand.confusionPolicy
+        if target == activeNumberDrillFocus(for: profile) {
+            if effectiveScaffoldingLevel >= 2 { return .avoid }
+            // Focus rounds never jump straight to deliberate confusion drills.
+            return bandPolicy == .intentionallyPractice ? .allowSameTens : bandPolicy
+        }
+        guard profile.knownNumbers.contains(target) else { return .avoid }
+        return bandPolicy
+    }
+
+    /// Builds one numbers round: target selection per phase, band-driven
+    /// distractors via `NumberDifficulty.pickDistractors`, and a typed
+    /// `LearningRound` so `processAnswer` records against `numberStats`.
+    private func buildNumberRound(
+        profile: Profile,
+        warmup: Bool = false,
+        forcedTarget: String? = nil,
+        rescue: RescueDifficulty? = nil
+    ) {
+        let introducedPool = NumberDifficulty.playablePool(introduced: profile.introducedNumbers)
+        let focus = activeNumberDrillFocus(for: profile)
+        let calibrationPool = NumberDifficulty.calibrationPool()
+
+        var assessmentBucket: WeeklyAssessmentBucket?
+        let target: String
+        if let forcedTarget, NumberDifficulty.isEligibleTarget(forcedTarget) {
+            target = forcedTarget
+        } else if warmup {
+            let byPriority = profile.numbersByReviewPriority
+            let pool = preferringUnderTargetCap(byPriority.isEmpty ? introducedPool : byPriority)
+            target = preferNotRecentlyTargetedNumber(pool)
+                ?? pool.first
+                ?? focus
+                ?? calibrationPool[0]
+        } else if phase == .drill, let focus {
+            let focusBudgetOpen = focusTargetAttemptsThisSession < maxFocusTargetsPerSession
+            let focusAvailable = letterUnderTargetCap(focus)
+            let focusWasJustAsked = previousTarget == focus || recentTargetLetters.contains(focus)
+            let mustForceFocus = !helloFocusAwarded
+                && (roundsThisSession + 1) >= firstFocusAppearanceDeadline
+                && focusAvailable
+            let alternatives = numbersNeedingWork(profile: profile, excluding: focus)
+            let fallbackAlternatives = uniqueEligibleNumberTargets(introducedPool.filter { $0 != focus })
+            let wantFocus = focusAvailable
+                && focusBudgetOpen
+                && Double.random(in: 0..<1) < focusTargetChance()
+            if mustForceFocus || (wantFocus && !(focusWasJustAsked && !fallbackAlternatives.isEmpty)) {
+                target = focus
+            } else {
+                let candidates = alternatives.isEmpty ? fallbackAlternatives : alternatives
+                target = preferNotRecentlyTargetedNumber(preferringUnderTargetCap(candidates))
+                    ?? (focusAvailable ? focus : candidates.first ?? focus)
+            }
+        } else if plan.dailyPracticeKind == .reviewTest,
+                  let assessmentTarget = chooseWeeklyNumberAssessmentTarget(profile: profile) {
+            currentPlainReviewIntentOverride = .weeklyAssessment
+            assessmentBucket = profile.activeWeeklyNumberAssessment?.result(for: assessmentTarget).bucket
+            target = assessmentTarget
+        } else {
+            if plan.dailyPracticeKind == .reviewTest {
+                currentPlainReviewIntentOverride = .staleReview
+            }
+            let needsWork = numbersNeedingWork(profile: profile, excluding: nil)
+            let pool = needsWork.isEmpty ? uniqueEligibleNumberTargets(introducedPool) : needsWork
+            target = preferNotRecentlyTargetedNumber(preferringUnderTargetCap(pool))
+                ?? pool.first
+                ?? calibrationPool[0]
+        }
+        targetLetter = target
+
+        let optionCount = resolvedNumberOptionCount(
+            for: target,
+            profile: profile,
+            assessmentBucket: assessmentBucket,
+            forceFour: rescue != nil
+        )
+
+        // Distractor pool: introduced numbers, padded with the early
+        // calibration pool when the profile is still sparse. Easy rescue
+        // narrows to known numbers when enough exist.
+        var pool = Set(introducedPool).subtracting([target])
+        if pool.count < optionCount - 1 {
+            pool.formUnion(calibrationPool.filter { $0 != target })
+        }
+        var poolArray = Array(pool)
+        if rescue == .easy {
+            let knownOnly = poolArray.filter { profile.knownNumbers.contains($0) }
+            if knownOnly.count >= optionCount - 1 {
+                poolArray = knownOnly
+            }
+        }
+
+        let policy = numberConfusionPolicy(for: target, profile: profile, rescue: rescue)
+        var distractors = NumberDifficulty.pickDistractors(
+            target: target,
+            count: optionCount - 1,
+            from: poolArray,
+            policy: policy,
+            preferHard: rescue == nil && policy == .intentionallyPractice
+        )
+        if distractors.count < optionCount - 1 {
+            // Relax the policy tier by tier before shrinking the grid: a
+            // same-decade digit beats an under-filled round. Transposes stay
+            // blocked until the deliberate-practice tier by construction.
+            let relaxations: [NumberDifficulty.ConfusionPolicy] = [.allowSameOnes, .allowSameTens, .intentionallyPractice]
+            for relaxed in relaxations where distractors.count < optionCount - 1 {
+                let extra = NumberDifficulty.pickDistractors(
+                    target: target,
+                    count: (optionCount - 1) - distractors.count,
+                    from: poolArray.filter { !distractors.contains($0) },
+                    policy: relaxed
+                )
+                distractors.append(contentsOf: extra.filter { !distractors.contains($0) })
+            }
+        }
+
+        displayedLetters = placeAnswer(
+            target: target,
+            distractors: distractors,
+            isFocusTarget: target == focus,
+            optionCount: optionCount
+        )
+        currentActivityKind = .numberRecognition
+        currentRound = LearningRound(
+            target: .number(target),
+            options: displayedLetters.map { .number($0) },
+            activityKind: .numberRecognition
+        )
+    }
+
     private func makeRoundPlanReason(profile: Profile) -> RoundPlanReason {
         let primaryGoal: RoundPrimaryGoal
         switch currentRoundIntent {
@@ -1349,8 +1737,14 @@ final class AdaptiveGameState: ObservableObject {
             targetSource = .parentPractice
         } else if plan.primaryLayer == .syllables {
             targetSource = profile.currentSyllableFocus == targetLetter ? .currentFocus : .bridgePrerequisite
-        } else if plan.primaryLayer == .words {
-            targetSource = profile.currentWordFocus == targetLetter ? .currentFocus : .playableCurriculum
+        } else if plan.primaryLayer == .numbers {
+            if currentRoundIntent == .weeklyAssessment, plan.weeklyReviewLetters.contains(targetLetter) {
+                targetSource = .weeklyAssessmentCohort
+            } else if activeNumberDrillFocus(for: profile) == targetLetter {
+                targetSource = .currentFocus
+            } else {
+                targetSource = .knownReview
+            }
         } else if currentRoundIntent == .weeklyAssessment,
                   plan.dailyPracticeKind == .reviewTest,
                   plan.weeklyReviewLetters.contains(targetLetter) {
@@ -1370,6 +1764,19 @@ final class AdaptiveGameState: ObservableObject {
             distractorPolicy = .tileAssembly
         } else if plan.primaryLayer == .syllables || plan.primaryLayer == .words {
             distractorPolicy = .audioPlayableOnly
+        } else if plan.primaryLayer == .numbers {
+            if currentRoundIsRescue {
+                distractorPolicy = .easyKnown
+            } else {
+                switch numberConfusionPolicy(for: targetLetter, profile: profile) {
+                case .avoid:
+                    distractorPolicy = .avoidConfusables
+                case .allowSameOnes, .allowSameTens:
+                    distractorPolicy = .fluentConfusablesAllowed
+                case .intentionallyPractice:
+                    distractorPolicy = .intentionallyPracticeConfusables
+                }
+            }
         } else if let focus = activeDrillFocus(for: profile) {
             switch drillDistractorPolicy(forDrillFocus: focus, profile: profile) {
             case .avoid:
@@ -1551,9 +1958,12 @@ final class AdaptiveGameState: ObservableObject {
         if liveDifficulty == .easierUntilStreak {
             governorCorrectStreak = wasCorrect ? governorCorrectStreak + 1 : 0
             let recoveryWindow = recentRoundCorrectness.suffix(5)
+            let frozenBase = plan.primaryLayer == .numbers
+                ? frozenNumberOptionsPerRound
+                : frozenLetterOptionsPerRound
             let recovered = recoveryWindow.count == 5
                 && recoveryWindow.filter { $0 }.count >= 4
-                && optionCount <= max(4, frozenLetterOptionsPerRound - 2 * governorEaseSteps)
+                && optionCount <= max(4, frozenBase - 2 * governorEaseSteps)
             if recovered {
                 governorCorrectStreak = 0
                 governorEaseSteps = max(0, governorEaseSteps - 1)
@@ -1764,7 +2174,11 @@ final class AdaptiveGameState: ObservableObject {
     func commitSessionStartIfNeeded(lowercaseMode: LowercaseMode = .uppercaseOnly) {
         guard roundsThisSession == 0 else { return }
         guard case .adaptiveDaily = plan.mode else { return }
-        _ = profileManager?.commitSessionStartIfNeeded(profileId: profileId, lowercaseMode: lowercaseMode)
+        _ = profileManager?.commitSessionStartIfNeeded(
+            profileId: profileId,
+            lowercaseMode: lowercaseMode,
+            layer: plan.primaryLayer
+        )
     }
 
     /// Bump the per-round replay counter. Called by `GameView`'s
@@ -1826,6 +2240,8 @@ final class AdaptiveGameState: ObservableObject {
             selectedTarget = .syllable(selected)
         case .word:
             selectedTarget = .word(selected)
+        case .number:
+            selectedTarget = .number(selected)
         }
         let wasCorrect = selectedTarget == roundTarget
         let correctLetter = targetLetter
@@ -2144,7 +2560,7 @@ final class AdaptiveGameState: ObservableObject {
 
             if heartsRemaining == 0 {
                 sessionEnd = .outOfHearts
-            } else if roundTarget.kind == .letter {
+            } else if roundTarget.kind == .letter || roundTarget.kind == .number {
                 // Phase 2a (#1): two-tier rescue queue.
                 //
                 // * If the round we just answered was *itself* a rescue
@@ -2223,12 +2639,26 @@ final class AdaptiveGameState: ObservableObject {
     /// always ended somehow.
     func makeSummary(reason: SessionEndReason) -> SessionSummary {
         let profile = currentProfile() ?? fallbackProfile
+        let isNumbersSession = plan.primaryLayer == .numbers
         let total = profile.language.letters.count
         let nextLevel = profile.alphabetLevel
         let threshold = nextLevel.threshold(language: profile.language)
+        // Numbers sessions report mastery over the introduced pool, not the
+        // whole 0…100 curriculum — the pool is what the child has actually
+        // been taught, so the end-screen bar stays motivating and honest.
+        let numberMastered = profile.numberMasteredCount
+        let numberPoolTotal = max(profile.introducedNumbers.count, numberMastered, 1)
+        let sessionFocus = plan.primaryLayer == .numbers
+            ? profile.currentFocusNumber
+            : profile.currentFocusLetter
         let nextFocusPreview: String?
-        if let focus = profile.currentFocusLetter, focusGraduatedThisSession == nil {
+        if let focus = sessionFocus, focusGraduatedThisSession == nil {
             nextFocusPreview = focus
+        } else if plan.primaryLayer == .numbers {
+            nextFocusPreview = NumberDifficulty.nextFocusCandidate(
+                introduced: profile.introducedNumbers,
+                known: profile.knownNumbers
+            )
         } else {
             nextFocusPreview = nextUnintroducedLetter(profile: profile)
         }
@@ -2244,14 +2674,15 @@ final class AdaptiveGameState: ObservableObject {
             focusGraduatedThisSession: focusGraduatedThisSession,
             dayStreakCount: profile.dailyStreakCount,
             bestDailyStreak: profile.bestDailyStreak,
-            letterMasteredCount: profile.letterMasteredCount,
-            totalLetters: total,
-            nextLevelThreshold: threshold,
-            currentFocusLetter: profile.currentFocusLetter,
+            letterMasteredCount: isNumbersSession ? numberMastered : profile.letterMasteredCount,
+            totalLetters: isNumbersSession ? numberPoolTotal : total,
+            nextLevelThreshold: isNumbersSession ? numberPoolTotal : threshold,
+            currentFocusLetter: sessionFocus,
             nextFocusPreview: nextFocusPreview,
             didLevelUp: didLevelUpThisSession,
             newLevel: nextLevel,
-            unintroducedExposures: unintroducedExposuresThisSession
+            unintroducedExposures: unintroducedExposuresThisSession,
+            primaryLayer: plan.primaryLayer
         )
     }
 
@@ -2274,23 +2705,44 @@ final class AdaptiveGameState: ObservableObject {
                 guard persistedFocus == nil || persistedFocus == previewFocus else { return profile }
                 profile.currentFocusLetter = previewFocus
                 profile.introducedLetters.insert(previewFocus)
+            case .number(let previewFocus):
+                let persistedFocus = profile.currentFocusNumber
+                guard persistedFocus == nil || persistedFocus == previewFocus else { return profile }
+                profile.currentFocusNumber = previewFocus
+                profile.introducedNumbers.insert(previewFocus)
             case .syllable, .word:
                 return profile
             }
         } else if let previewFocus = plan.focusLetter {
             hasPreviewFocus = true
-            let persistedFocus = profile.currentFocusLetter
-            guard persistedFocus == nil || persistedFocus == previewFocus else { return profile }
-            profile.currentFocusLetter = previewFocus
-            profile.introducedLetters.insert(previewFocus)
+            if plan.primaryLayer == .numbers {
+                let persistedFocus = profile.currentFocusNumber
+                guard persistedFocus == nil || persistedFocus == previewFocus else { return profile }
+                profile.currentFocusNumber = previewFocus
+                profile.introducedNumbers.insert(previewFocus)
+            } else {
+                let persistedFocus = profile.currentFocusLetter
+                guard persistedFocus == nil || persistedFocus == previewFocus else { return profile }
+                profile.currentFocusLetter = previewFocus
+                profile.introducedLetters.insert(previewFocus)
+            }
         }
         if let spotlight = plan.dailySpotlightLetter {
-            profile.introducedLetters.insert(spotlight)
+            if plan.primaryLayer == .numbers {
+                profile.introducedNumbers.insert(spotlight)
+            } else {
+                profile.introducedLetters.insert(spotlight)
+            }
         }
 
         if hasPreviewFocus {
-            profile.focusStartedDay = profile.focusStartedDay ?? LocalDay.today()
-            profile.focusPracticedDays.insert(LocalDay.today())
+            if plan.primaryLayer == .numbers {
+                profile.numberFocusStartedDay = profile.numberFocusStartedDay ?? LocalDay.today()
+                profile.numberFocusPracticedDays.insert(LocalDay.today())
+            } else {
+                profile.focusStartedDay = profile.focusStartedDay ?? LocalDay.today()
+                profile.focusPracticedDays.insert(LocalDay.today())
+            }
         }
         return profile
     }

@@ -107,7 +107,12 @@ struct GameView: View {
             }
 
             if let intro = showFocusIntro {
-                NewLetterOverlay(letter: intro, color: profile.colorTheme, avatar: profile.avatarId.emoji) {
+                NewLetterOverlay(
+                    letter: intro,
+                    color: profile.colorTheme,
+                    avatar: profile.avatarId.emoji,
+                    title: plan.primaryLayer == .numbers ? "Meet your number" : "Meet your letter"
+                ) {
                     showFocusIntro = nil
                     playPrompt(after: 0.3)
                 }
@@ -559,7 +564,7 @@ struct GameView: View {
         gameState.sessionEnded = .homeTapped
         let summary = gameState.makeSummary(reason: .homeTapped)
         profileManager.endSession(profileId: profile.id, summary: summary)
-        checkpointStore.clear(profileId: profile.id)
+        checkpointStore.clear(profileId: profile.id, layer: plan.primaryLayer)
         onHome()
     }
 
@@ -567,7 +572,11 @@ struct GameView: View {
         guard !isEndingSession else { return }
         HapticService.shared.success()
         if let milestone = gameState.claimableDailyGoalMilestone {
-            profileManager.claimDailyPracticeWinner(profileId: profile.id, milestone: milestone)
+            profileManager.claimDailyPracticeWinner(
+                profileId: profile.id,
+                milestone: milestone,
+                layer: plan.primaryLayer
+            )
         }
         startWinnerCelebration()
         // Hand-off delay tuned to the celebration timeline below: WOW
@@ -654,7 +663,7 @@ struct GameView: View {
         gameState.sessionEnded = reason
         let summary = gameState.makeSummary(reason: reason)
         profileManager.endSession(profileId: profile.id, summary: summary)
-        checkpointStore.clear(profileId: profile.id)
+        checkpointStore.clear(profileId: profile.id, layer: plan.primaryLayer)
         let delay: UInt64 = delayOverride ?? (immediate ? 0 : 700_000_000)
         sessionEndTask = Task {
             if delay > 0 {
@@ -682,7 +691,7 @@ struct GameView: View {
         gameState.sessionEnded = .practiceComplete
         let summary = gameState.makeSummary(reason: .practiceComplete)
         profileManager.endSession(profileId: profile.id, summary: summary)
-        checkpointStore.clear(profileId: profile.id)
+        checkpointStore.clear(profileId: profile.id, layer: plan.primaryLayer)
         onWeeklyTestCompletedByParent()
     }
 
@@ -758,13 +767,17 @@ struct GameView: View {
         guard !isEndingSession else { return }
         guard gameState.sessionEnded == nil else { return }
         let snapshot = gameState.captureSnapshot(advanceToNextRoundOnRestore: advanceToNextRoundOnRestore)
-        checkpointStore.save(SessionCheckpointEnvelope(
-            profileId: profile.id,
-            kind: .game,
-            savedAt: Date(),
-            sessionPlan: plan,
-            game: snapshot
-        ))
+        checkpointStore.save(
+            SessionCheckpointEnvelope(
+                profileId: profile.id,
+                kind: .game,
+                learningLayer: plan.primaryLayer,
+                savedAt: Date(),
+                sessionPlan: plan,
+                game: snapshot
+            ),
+            layer: plan.primaryLayer
+        )
     }
 }
 
@@ -816,6 +829,8 @@ struct NewLetterOverlay: View {
     let letter: String
     let color: Color
     let avatar: String
+    /// Layer-aware headline ("Meet your letter" / "Meet your number").
+    var title: String = "Meet your letter"
     let onDismiss: () -> Void
 
     var body: some View {
@@ -828,7 +843,7 @@ struct NewLetterOverlay: View {
                         .font(.brandEyebrow())
                         .tracking(2.6)
                         .foregroundColor(.white.opacity(0.7))
-                    Text("Meet your letter")
+                    Text(title)
                         .font(.brandTitleL(26))
                         .tracking(-0.6)
                         .foregroundColor(.white)

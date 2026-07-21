@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Generate bundled letter audio assets expected by Pismenka.
+Generate bundled letter and number audio assets expected by Pismenka.
 
 Default provider is macOS `say`, which works offline and can generate the full
 asset set immediately. `say` must be allowed to use the macOS speech service;
 if generated files are tiny/empty, rerun outside restrictive sandboxes. For the
-current shipped letter voices, pass `--provider google`; Czech defaults to
-Google Cloud TTS `cs-CZ-Chirp3-HD-Achernar`, and American English defaults to
-`en-US-Chirp3-HD-Aoede`.
+current shipped letter voices (and the intended shipped number voices), pass
+`--provider google`; Czech defaults to Google Cloud TTS
+`cs-CZ-Chirp3-HD-Achernar`, and American English defaults to
+`en-US-Chirp3-HD-Aoede`. All curriculum voice is machine TTS — there is no
+human-recording step in this pipeline.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "Pismenka" / "Sounds"
 LETTERS_DIR = OUTPUT_DIR / "Letters"
+NUMBERS_DIR = OUTPUT_DIR / "Numbers"
 
 ENGLISH_LETTERS = [chr(code) for code in range(ord("A"), ord("Z") + 1)]
 CZECH_LETTERS = [
@@ -112,6 +115,64 @@ CZECH_LETTER_PROMPTS = {
     "Ž": "Žet jako žába",
 }
 
+# Full word forms for the 0…100 number curriculum. TTS providers must NEVER
+# be fed the digit string ("26") — they read it inconsistently ("two six").
+# Czech uses the counting forms "jedna"/"dvě" (never "jeden"/"dva"), matching
+# NumberSpokenForm in Pismenka/Services/AudioService.swift.
+ENGLISH_NUMBER_ONES = [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+    "seventeen", "eighteen", "nineteen",
+]
+
+ENGLISH_NUMBER_TENS = {
+    2: "twenty", 3: "thirty", 4: "forty", 5: "fifty",
+    6: "sixty", 7: "seventy", 8: "eighty", 9: "ninety",
+}
+
+CZECH_NUMBER_ONES = [
+    "nula", "jedna", "dvě", "tři", "čtyři", "pět", "šest", "sedm", "osm", "devět",
+    "deset", "jedenáct", "dvanáct", "třináct", "čtrnáct", "patnáct", "šestnáct",
+    "sedmnáct", "osmnáct", "devatenáct",
+]
+
+CZECH_NUMBER_TENS = {
+    2: "dvacet", 3: "třicet", 4: "čtyřicet", 5: "padesát",
+    6: "šedesát", 7: "sedmdesát", 8: "osmdesát", 9: "devadesát",
+}
+
+
+def english_number_word(value: int) -> str:
+    if not 0 <= value <= 100:
+        raise ValueError(f"Number out of curriculum range: {value}")
+    if value == 100:
+        return "one hundred"
+    if value < 20:
+        return ENGLISH_NUMBER_ONES[value]
+    tens, ones = divmod(value, 10)
+    if ones == 0:
+        return ENGLISH_NUMBER_TENS[tens]
+    return f"{ENGLISH_NUMBER_TENS[tens]}-{ENGLISH_NUMBER_ONES[ones]}"
+
+
+def czech_number_word(value: int) -> str:
+    if not 0 <= value <= 100:
+        raise ValueError(f"Number out of curriculum range: {value}")
+    if value == 100:
+        return "sto"
+    if value < 20:
+        return CZECH_NUMBER_ONES[value]
+    tens, ones = divmod(value, 10)
+    if ones == 0:
+        return CZECH_NUMBER_TENS[tens]
+    return f"{CZECH_NUMBER_TENS[tens]} {CZECH_NUMBER_ONES[ones]}"
+
+
+NUMBER_SPOKEN_FORMS = {
+    "en": {n: english_number_word(n) for n in range(101)},
+    "cz": {n: czech_number_word(n) for n in range(101)},
+}
+
 SFX_SPECS = {
     "sfx_correct.mp3": "sine=frequency=880:duration=0.12,sine=frequency=1320:duration=0.14",
     "sfx_wrong.mp3": "sine=frequency=220:duration=0.18",
@@ -178,11 +239,22 @@ def audio_key(value: str) -> str:
     return value.lower()
 
 
+def is_number_filename(filename: str) -> bool:
+    stem = filename.removesuffix(".m4a")
+    for prefix in ("en_", "cz_"):
+        if stem.startswith(prefix):
+            digits = stem[len(prefix):]
+            return digits.isascii() and digits.isdigit() and 0 <= int(digits) <= 100
+    return False
+
+
 def is_czech_letter_filename(filename: str) -> bool:
-    return filename.startswith("cz_")
+    return filename.startswith("cz_") and not is_number_filename(filename)
 
 
 def output_path_for(filename: str) -> Path:
+    if is_number_filename(filename):
+        return NUMBERS_DIR / filename
     if filename.startswith("en_") or is_czech_letter_filename(filename):
         return LETTERS_DIR / filename
     return OUTPUT_DIR / filename
@@ -232,8 +304,28 @@ def expected_voice_assets() -> list[Asset]:
     return assets
 
 
-def missing_assets(include_sfx: bool = True) -> list[str]:
+def expected_number_assets() -> list[Asset]:
+    assets: list[Asset] = []
+    for n in range(101):
+        assets.append(Asset(
+            filename=f"en_{n}.m4a",
+            text=f"{NUMBER_SPOKEN_FORMS['en'][n]}.",
+            language="en",
+            voice="Samantha",
+        ))
+        assets.append(Asset(
+            filename=f"cz_{n}.m4a",
+            text=f"{NUMBER_SPOKEN_FORMS['cz'][n]}.",
+            language="cs",
+            voice="Zuzana",
+        ))
+    return assets
+
+
+def missing_assets(include_sfx: bool = True, include_numbers: bool = False) -> list[str]:
     expected = [asset.filename for asset in expected_voice_assets()]
+    if include_numbers:
+        expected += [asset.filename for asset in expected_number_assets()]
     if include_sfx:
         expected += list(SFX_SPECS.keys())
     return sorted(name for name in expected if not output_path_for(name).exists())
@@ -517,13 +609,18 @@ def main() -> int:
     parser.add_argument("--only-files", help="Path to a newline-separated list of filenames to generate.")
     parser.add_argument("--only-english-letters", action="store_true", help="Only generate English alphabet letter files.")
     parser.add_argument("--only-czech-letters", action="store_true", help="Only generate Czech alphabet letter files.")
+    parser.add_argument("--numbers", action="store_true", help="Also generate number assets (en_0…en_100, cz_0…cz_100) into Sounds/Numbers.")
     parser.add_argument("--skip-sfx", action="store_true", help="Only generate voice .m4a files.")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     LETTERS_DIR.mkdir(parents=True, exist_ok=True)
+    if args.numbers:
+        NUMBERS_DIR.mkdir(parents=True, exist_ok=True)
 
     voice_assets = expected_voice_assets()
+    if args.numbers:
+        voice_assets += expected_number_assets()
     if args.only_english_letters or args.only_czech_letters:
         letter_filenames: set[str] = set()
         if args.only_english_letters:
@@ -598,7 +695,7 @@ def main() -> int:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         generate_sfx(filename, out_path)
 
-    remaining = missing_assets(include_sfx=not args.skip_sfx)
+    remaining = missing_assets(include_sfx=not args.skip_sfx, include_numbers=args.numbers)
     if remaining:
         print("\nStill missing:")
         for name in remaining:

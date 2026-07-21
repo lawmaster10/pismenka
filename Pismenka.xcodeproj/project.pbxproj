@@ -31,6 +31,7 @@
 		1A0000053 /* CalibrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000063 /* CalibrationView.swift */; };
 		1A0000054 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000064 /* SettingsView.swift */; };
 		1A0000055 /* ParentDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000065 /* ParentDashboardView.swift */; };
+		1A0000F11 /* ParentNumberDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000F12 /* ParentNumberDashboardView.swift */; };
 		1A0000056 /* LocalDay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000066 /* LocalDay.swift */; };
 		1A0000057 /* ProfileLearningSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000067 /* ProfileLearningSnapshot.swift */; };
 		1A0000058 /* LetterSymbol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000068 /* LetterSymbol.swift */; };
@@ -53,6 +54,8 @@
 		1A0000C4 /* WordCurriculum.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D4 /* WordCurriculum.swift */; };
 		1A0000C5 /* CurriculumAudioAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D5 /* CurriculumAudioAvailability.swift */; };
 		1A0000C6 /* AdaptiveLearningScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D6 /* AdaptiveLearningScheduler.swift */; };
+		1A0000C7 /* NumberDifficulty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D7 /* NumberDifficulty.swift */; };
+		1A0000C8 /* NumberInstructionalBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000D8 /* NumberInstructionalBand.swift */; };
 		84EC4E122F9F3BDC006CFBC3 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 84EC4E112F9F3BDC006CFBC3 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
@@ -94,6 +97,7 @@
 		1A0000063 /* CalibrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationView.swift; sourceTree = "<group>"; };
 		1A0000064 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1A0000065 /* ParentDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentDashboardView.swift; sourceTree = "<group>"; };
+		1A0000F12 /* ParentNumberDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentNumberDashboardView.swift; sourceTree = "<group>"; };
 		1A0000066 /* LocalDay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDay.swift; sourceTree = "<group>"; };
 		1A0000067 /* ProfileLearningSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLearningSnapshot.swift; sourceTree = "<group>"; };
 		1A0000068 /* LetterSymbol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LetterSymbol.swift; sourceTree = "<group>"; };
@@ -113,6 +117,8 @@
 		1A0000D4 /* WordCurriculum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordCurriculum.swift; sourceTree = "<group>"; };
 		1A0000D5 /* CurriculumAudioAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurriculumAudioAvailability.swift; sourceTree = "<group>"; };
 		1A0000D6 /* AdaptiveLearningScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveLearningScheduler.swift; sourceTree = "<group>"; };
+		1A0000D7 /* NumberDifficulty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumberDifficulty.swift; sourceTree = "<group>"; };
+		1A0000D8 /* NumberInstructionalBand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumberInstructionalBand.swift; sourceTree = "<group>"; };
 		84EC4E112F9F3BDC006CFBC3 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -181,6 +187,8 @@
 				1A0000060 /* SkillLevel.swift */,
 				1A0000061 /* LetterStat.swift */,
 				1A0000062 /* LetterDifficulty.swift */,
+				1A0000D7 /* NumberDifficulty.swift */,
+				1A0000D8 /* NumberInstructionalBand.swift */,
 				1A0000066 /* LocalDay.swift */,
 				1A0000067 /* ProfileLearningSnapshot.swift */,
 				1A0000068 /* LetterSymbol.swift */,
@@ -275,6 +283,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000065 /* ParentDashboardView.swift */,
+				1A0000F12 /* ParentNumberDashboardView.swift */,
 			);
 			path = Parent;
 			sourceTree = "<group>";
@@ -418,6 +427,7 @@
 				1A0000053 /* CalibrationView.swift in Sources */,
 				1A0000054 /* SettingsView.swift in Sources */,
 				1A0000055 /* ParentDashboardView.swift in Sources */,
+				1A0000F11 /* ParentNumberDashboardView.swift in Sources */,
 				1A0000056 /* LocalDay.swift in Sources */,
 				1A0000057 /* ProfileLearningSnapshot.swift in Sources */,
 				1A0000058 /* LetterSymbol.swift in Sources */,
@@ -434,6 +444,8 @@
 				1A0000C4 /* WordCurriculum.swift in Sources */,
 				1A0000C5 /* CurriculumAudioAvailability.swift in Sources */,
 				1A0000C6 /* AdaptiveLearningScheduler.swift in Sources */,
+				1A0000C7 /* NumberDifficulty.swift in Sources */,
+				1A0000C8 /* NumberInstructionalBand.swift in Sources */,
 				1A000090 /* FirebaseBackupService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -605,7 +617,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -643,7 +655,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -667,7 +679,7 @@
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -687,7 +699,7 @@
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

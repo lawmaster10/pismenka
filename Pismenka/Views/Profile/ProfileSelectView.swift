@@ -76,6 +76,7 @@ struct ProfileSelectView: View {
                         ForEach(profileManager.profiles) { profile in
                             ProfileCardView(
                                 profile: profile,
+                                layer: settings.activeLearningLayer,
                                 onTap: {
                                     HapticService.shared.tap()
                                     onProfileSelected(profile)
@@ -107,28 +108,32 @@ struct ProfileSelectView: View {
                     .padding(.bottom, 24)
                 }
 
-                BrandIconButton(
-                    systemImage: "plus",
-                    action: {
-                        if profileManager.canCreateProfile {
-                            HapticService.shared.tap()
-                            parentGateAction = .create
-                            showParentGate = true
-                        } else {
-                            HapticService.shared.error()
-                            withAnimation(.default) {
-                                shakeAddButton = true
+                VStack(spacing: 16) {
+                    learningLayerToggle
+
+                    BrandIconButton(
+                        systemImage: "plus",
+                        action: {
+                            if profileManager.canCreateProfile {
+                                HapticService.shared.tap()
+                                parentGateAction = .create
+                                showParentGate = true
+                            } else {
+                                HapticService.shared.error()
+                                withAnimation(.default) {
+                                    shakeAddButton = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    shakeAddButton = false
+                                }
                             }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                shakeAddButton = false
-                            }
-                        }
-                    },
-                    size: 70,
-                    style: .ink,
-                    accessibilityLabel: "Add a profile"
-                )
-                .modifier(ShakeEffect(shakes: shakeAddButton ? 3 : 0))
+                        },
+                        size: 70,
+                        style: .ink,
+                        accessibilityLabel: "Add a profile"
+                    )
+                    .modifier(ShakeEffect(shakes: shakeAddButton ? 3 : 0))
+                }
                 .padding(.bottom, 36)
             }
         }
@@ -160,22 +165,35 @@ struct ProfileSelectView: View {
             SettingsView()
         }
         .sheet(item: $selectedProfileForDashboard) { profile in
-            ParentDashboardView(
-                profile: profile,
-                onEdit: {
-                    selectedProfileForDashboard = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        selectedProfileForEdit = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
+            if settings.activeLearningLayer == .numbers {
+                ParentNumberDashboardView(
+                    profile: profile,
+                    onPractice: { number in
+                        selectedProfileForDashboard = nil
+                        onPracticeSelected(profile, number)
+                    },
+                    onClose: {
+                        selectedProfileForDashboard = nil
                     }
-                },
-                onPractice: { letter in
-                    selectedProfileForDashboard = nil
-                    onPracticeSelected(profile, letter)
-                },
-                onClose: {
-                    selectedProfileForDashboard = nil
-                }
-            )
+                )
+            } else {
+                ParentDashboardView(
+                    profile: profile,
+                    onEdit: {
+                        selectedProfileForDashboard = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            selectedProfileForEdit = profileManager.profiles.first(where: { $0.id == profile.id }) ?? profile
+                        }
+                    },
+                    onPractice: { letter in
+                        selectedProfileForDashboard = nil
+                        onPracticeSelected(profile, letter)
+                    },
+                    onClose: {
+                        selectedProfileForDashboard = nil
+                    }
+                )
+            }
         }
         .sheet(item: $selectedProfileForEdit) { profile in
             EditProfileView(
@@ -251,12 +269,57 @@ struct ProfileSelectView: View {
         parentGateAction = .openSettings
         showParentGate = true
     }
+
+    // MARK: - Learning layer toggle
+
+    /// Pinned home-screen Letters ↔ Numbers switch. Writes straight to the
+    /// local-only `AppSettings.activeLearningLayer`; only these two layers
+    /// are exposed here (syllables/words unlock through the letters path).
+    private var learningLayerToggle: some View {
+        HStack(spacing: 4) {
+            layerSegment(.letters, emoji: "🔤", title: "Letters")
+            layerSegment(.numbers, emoji: "🔢", title: "Numbers")
+        }
+        .padding(5)
+        .background(Capsule(style: .continuous).fill(Color.white.opacity(0.85)))
+        .overlay(Capsule(style: .continuous).stroke(Color.creamDeep, lineWidth: 1))
+        .shadow(color: Color.ink.opacity(0.06), radius: 10, x: 0, y: 6)
+    }
+
+    private func layerSegment(_ layer: LearningLayer, emoji: String, title: String) -> some View {
+        let isActive = settings.activeLearningLayer == layer
+        return Button {
+            guard !isActive else { return }
+            HapticService.shared.tap()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                settings.activeLearningLayer = layer
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(emoji)
+                    .font(.system(size: 16))
+                Text(title)
+                    .font(.brandBody(14, weight: .black))
+                    .foregroundColor(isActive ? .white : .slate500)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isActive ? Color.ink : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Switch to \(title.lowercased()) mode")
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
 }
 
 // MARK: - Profile Card View
 
 struct ProfileCardView: View {
     let profile: Profile
+    var layer: LearningLayer = .letters
     let onTap: () -> Void
     let onViewResults: () -> Void
     let onEditProfile: () -> Void
@@ -267,6 +330,16 @@ struct ProfileCardView: View {
     private var snapshot: ProfileLearningSnapshot { profile.snapshot }
     private var letterKnowledgeSummary: ParentLetterKnowledgeSummary {
         snapshot.parentLetterKnowledgeSummary(alphabetLetters: Set(profile.language.letters))
+    }
+
+    /// Layer-aware "Confident n / m" headline. Numbers mode counts against
+    /// the introduced pool (see `numberKnowledgePool`), never all 101.
+    private var confidentCountText: String {
+        if layer == .numbers {
+            let summary = snapshot.parentNumberKnowledgeSummary(pool: snapshot.numberKnowledgePool)
+            return "\(summary.confidentlyKnownCount) / \(summary.totalNumbers)"
+        }
+        return "\(letterKnowledgeSummary.confidentlyKnownCount) / \(letterKnowledgeSummary.totalLetters)"
     }
 
     var body: some View {
@@ -294,7 +367,7 @@ struct ProfileCardView: View {
                 Spacer(minLength: 0)
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(letterKnowledgeSummary.confidentlyKnownCount) / \(letterKnowledgeSummary.totalLetters)")
+                    Text(confidentCountText)
                         .font(.brandTitleM(22))
                         .tracking(-0.6)
                         .foregroundColor(.ink)

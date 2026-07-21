@@ -242,7 +242,8 @@ class ProfileManager: ObservableObject {
     /// focus state, all letter stats, the active streak, and the in-game
     /// best-streak counter. Preserves avatar, name, language, and the
     /// trophy fields (`bestDailyStreak`, `highestAlphabetLevelEverReached`,
-    /// `celebratedAlphabetLevels`) so an erstwhile expert doesn't get re-shown
+    /// `celebratedAlphabetLevels`, `highestNumberBandEverReached`,
+    /// `celebratedNumberBands`) so an erstwhile expert doesn't get re-shown
     /// every level-up animation as they re-grind back up.
     ///
     /// This is the equivalent of "re-introduce my child to the app from
@@ -302,7 +303,34 @@ class ProfileManager: ObservableObject {
         // would let the dashboard show "they got Č right yesterday"
         // alongside an empty stats table, which is just confusing.
         profiles[index].recentRoundEvents = []
-        // bestDailyStreak, highestAlphabetLevelEverReached, and celebratedAlphabetLevels are
+        profiles[index].numberStats = [:]
+        profiles[index].introducedNumbers = []
+        profiles[index].everMasteredNumbers = []
+        profiles[index].currentFocusNumber = nil
+        profiles[index].hasCompletedNumberCalibration = false
+        profiles[index].numberFocusStartedDay = nil
+        profiles[index].numberFocusPracticedDays = []
+        profiles[index].lastNewNumberDay = nil
+        profiles[index].pausedFocusNumbers = []
+        profiles[index].pausedFocusNumberDays = [:]
+        profiles[index].lastNumberFocusSelection = nil
+        profiles[index].numberDailyPracticeDay = nil
+        profiles[index].numberDailyPracticeAttempts = 0
+        profiles[index].numberDailyPracticeWinnerClaimedDay = nil
+        profiles[index].numberDailyPracticeWinnerClaimedMilestone = 0
+        profiles[index].numberCameoExposureDay = nil
+        profiles[index].numberCameoExposuresToday = 0
+        profiles[index].numberDailyTargetAskDay = nil
+        profiles[index].numberDailyTargetAskCounts = [:]
+        profiles[index].numberLearningCycleStartDay = nil
+        profiles[index].weeklyIntroducedNumbers = []
+        profiles[index].completedNumberSessionsInCycle = 0
+        profiles[index].activeWeeklyNumberAssessment = nil
+        profiles[index].recentWeeklyNumberAssessments = []
+        profiles[index].numberGridPerformanceStats = [:]
+        profiles[index].lastFrozenNumberOptionsPerRound = nil
+        // bestDailyStreak, highestAlphabetLevelEverReached, celebratedAlphabetLevels,
+        // highestNumberBandEverReached, and celebratedNumberBands are
         // intentionally preserved — see top-of-section comment.
         profiles[index].markModified()
         saveProfilesImmediately()
@@ -326,6 +354,75 @@ class ProfileManager: ObservableObject {
     func markCalibrationComplete(profileId: UUID) {
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
         profiles[index].hasCompletedCalibration = true
+        profiles[index].markModified()
+        saveProfilesImmediately()
+    }
+
+    func markNumberCalibrationComplete(profileId: UUID) {
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
+        profiles[index].hasCompletedNumberCalibration = true
+        profiles[index].markModified()
+        saveProfilesImmediately()
+    }
+
+    // MARK: - Numbers-layer resets
+
+    /// Numbers twin of `resetCalibrationOnly`: re-runs the numbers calibration
+    /// UX without deleting any number learning history.
+    func resetNumberCalibrationOnly(profileId: UUID) {
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
+        lastResetSnapshot = profiles[index]
+        profiles[index].hasCompletedNumberCalibration = false
+        profiles[index].markModified()
+        saveProfilesImmediately()
+    }
+
+    /// Numbers twin of `resetCurrentFocus`: drops the current focus number so
+    /// the next numbers session picks a fresh one. Stats are preserved;
+    /// `lastNewNumberDay` is intentionally kept so the one-new-number-per-day
+    /// rule still holds.
+    func resetCurrentNumberFocus(profileId: UUID) {
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
+        lastResetSnapshot = profiles[index]
+        profiles[index].currentFocusNumber = nil
+        profiles[index].numberFocusStartedDay = nil
+        profiles[index].numberFocusPracticedDays = []
+        profiles[index].lastNumberFocusSelection = nil
+        profiles[index].markModified()
+        saveProfilesImmediately()
+    }
+
+    /// Numbers twin of `resetLetterStats`: wipes one number's stat, removes it
+    /// from lifetime mastery and the introduced pool, and clears the focus if
+    /// it was the current focus number.
+    func resetNumberStats(profileId: UUID, number: String) {
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
+        var profile = profiles[index]
+        lastResetSnapshot = profile
+        profile.numberStats.removeValue(forKey: number)
+        profile.everMasteredNumbers.remove(number)
+        profile.pausedFocusNumbers.remove(number)
+        profile.pausedFocusNumberDays.removeValue(forKey: number)
+        profile.introducedNumbers.remove(number)
+        if profile.currentFocusNumber == number {
+            profile.currentFocusNumber = nil
+            profile.numberFocusStartedDay = nil
+            profile.numberFocusPracticedDays = []
+        }
+        if profile.lastNumberFocusSelection?.selectedKey == number {
+            profile.lastNumberFocusSelection = nil
+        }
+        profile.markModified()
+        profiles[index] = profile
+        saveProfilesImmediately()
+    }
+
+    /// Numbers twin of `recordSessionFrozenGrid` — persists the frozen number
+    /// grid size for next-session hysteresis.
+    func recordSessionFrozenNumberGrid(profileId: UUID, value: Int) {
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
+        guard profiles[index].lastFrozenNumberOptionsPerRound != value else { return }
+        profiles[index].lastFrozenNumberOptionsPerRound = value
         profiles[index].markModified()
         saveProfilesImmediately()
     }
@@ -357,19 +454,31 @@ class ProfileManager: ObservableObject {
     /// inflate the day streak, won't earn extra "active days" on the focus
     /// scaffolding ladder, and won't be served a fresh new focus beyond
     /// the day's quota.
-    func previewSessionPlan(profileId: UUID, lowercaseMode: LowercaseMode = .uppercaseOnly) -> SessionPlan {
-        buildSessionPlan(profileId: profileId, lowercaseMode: lowercaseMode, commit: false)
+    func previewSessionPlan(
+        profileId: UUID,
+        lowercaseMode: LowercaseMode = .uppercaseOnly,
+        layer: LearningLayer = .letters
+    ) -> SessionPlan {
+        buildSessionPlan(profileId: profileId, lowercaseMode: lowercaseMode, layer: layer, commit: false)
     }
 
-    func commitSessionStartIfNeeded(profileId: UUID, lowercaseMode: LowercaseMode = .uppercaseOnly) -> SessionPlan {
-        buildSessionPlan(profileId: profileId, lowercaseMode: lowercaseMode, commit: true)
+    func commitSessionStartIfNeeded(
+        profileId: UUID,
+        lowercaseMode: LowercaseMode = .uppercaseOnly,
+        layer: LearningLayer = .letters
+    ) -> SessionPlan {
+        buildSessionPlan(profileId: profileId, lowercaseMode: lowercaseMode, layer: layer, commit: true)
     }
 
     private func buildSessionPlan(
         profileId: UUID,
         lowercaseMode: LowercaseMode = .uppercaseOnly,
+        layer: LearningLayer = .letters,
         commit: Bool
     ) -> SessionPlan {
+        if layer == .numbers {
+            return buildNumberSessionPlan(profileId: profileId, commit: commit)
+        }
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else {
             return SessionPlan(
                 warmupLength: 0,
@@ -722,6 +831,352 @@ class ProfileManager: ObservableObject {
         profile.activeWeeklyAssessment = assessment
     }
 
+    // MARK: - Numbers session planning
+
+    /// Numbers-layer twin of the letters branch in `buildSessionPlan`. The day
+    /// streak is shared with letters (a numbers session still counts as
+    /// "played today"); everything else reads and writes only the number twin
+    /// fields. Letter data — including `syllablesUnlockedAt` and the alphabet
+    /// level receipts — is never touched from this path.
+    private func buildNumberSessionPlan(profileId: UUID, commit: Bool) -> SessionPlan {
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }) else {
+            return SessionPlan(
+                warmupLength: 0,
+                introducedNewFocusLetter: false,
+                dayStreakCount: 0,
+                dayStreakIncreased: false,
+                focusLetter: nil,
+                primaryLayer: .numbers,
+                activityKind: .numberRecognition,
+                focusScaffoldingLevel: 0
+            )
+        }
+
+        var profile = profiles[index]
+        let today = LocalDay.today()
+
+        // Day-streak update — identical semantics to the letters branch,
+        // sharing `dailyStreakCount` / `lastSessionDay`.
+        var streakIncreased = false
+        var clockMovedBackward = false
+        if let last = profile.lastSessionDay {
+            let delta = today.daysSince(last)
+            if delta < 0 {
+                clockMovedBackward = true
+            } else if delta == 0 {
+                // Same-day re-entry: no streak change.
+            } else if delta == 1 {
+                profile.dailyStreakCount += 1
+                streakIncreased = true
+            } else {
+                profile.dailyStreakCount = 1
+                streakIncreased = true
+            }
+        } else {
+            profile.dailyStreakCount = 1
+            streakIncreased = true
+        }
+        if profile.dailyStreakCount > profile.bestDailyStreak {
+            profile.bestDailyStreak = profile.dailyStreakCount
+        }
+
+        let dailyPractice = resolveNumberDailyPractice(
+            profile: &profile,
+            today: today,
+            commit: commit,
+            clockMovedBackward: clockMovedBackward
+        )
+
+        let alreadyIntroducedToday = profile.lastNewNumberDay == today
+        var introducedNewFocus = false
+        var introducedFocusTarget: FocusTarget?
+        var dailySpotlightNumber: String?
+        var pausedStuckFocusToday = false
+
+        if !clockMovedBackward {
+            profile.clearExpiredPausedFocusNumbers(on: today)
+            if shouldPauseStuckNumberFocus(profile: profile) {
+                if let focus = profile.currentFocusNumber {
+                    profile.pausedFocusNumbers.insert(focus)
+                    profile.pausedFocusNumberDays[focus] = today
+                }
+                profile.currentFocusNumber = nil
+                profile.numberFocusStartedDay = nil
+                profile.numberFocusPracticedDays = []
+                profile.lastNumberFocusSelection = nil
+                profile.lastNewNumberDay = today
+                pausedStuckFocusToday = true
+            }
+
+            if dailyPractice.kind == .introduction,
+               !alreadyIntroducedToday,
+               !pausedStuckFocusToday,
+               let next = NumberDifficulty.nextFocusCandidate(
+                   introduced: profile.introducedNumbers,
+                   known: profile.knownNumbers,
+                   blocked: profile.activePausedFocusNumbers(on: today)
+               ) {
+                dailySpotlightNumber = next
+                profile.lastNewNumberDay = today
+                profile.introducedNumbers.insert(next)
+                introducedNewFocus = true
+                introducedFocusTarget = .number(next)
+                profile.weeklyIntroducedNumbers.insert(next)
+                if profile.currentFocusNumber == nil {
+                    profile.currentFocusNumber = next
+                    profile.numberFocusStartedDay = today
+                    profile.numberFocusPracticedDays = [today]
+                    profile.lastNumberFocusSelection = FocusSelectionReason(
+                        selectedKey: next,
+                        date: Date(),
+                        reason: .nextInOrder
+                    )
+                } else {
+                    profile.numberFocusPracticedDays.insert(today)
+                }
+            } else if profile.currentFocusNumber != nil {
+                profile.numberFocusPracticedDays.insert(today)
+            } else {
+                profile.numberFocusStartedDay = nil
+                profile.numberFocusPracticedDays = []
+            }
+
+            profile.lastSessionDay = today
+        }
+
+        if commit, dailyPractice.kind == .reviewTest {
+            startWeeklyNumberAssessmentIfNeeded(
+                profile: &profile,
+                scheduledFor: dailyPractice.scheduledReviewDay,
+                cohortNumbers: dailyPractice.weeklyReviewLetters,
+                today: today
+            )
+        }
+
+        if commit {
+            profile.markModified()
+            profiles[index] = profile
+            saveProfilesImmediately()
+        }
+
+        let knownCount = profile.knownNumbers.count
+        let baseWarmup: Int
+        if knownCount >= 6 { baseWarmup = 5 }
+        else if knownCount >= 4 { baseWarmup = 3 }
+        else if knownCount >= 3 { baseWarmup = 2 }
+        else { baseWarmup = 0 }
+        let now = Date()
+        let dueWarmupCount = profile.knownNumbers
+            .filter { profile.numberStats[$0]?.isReviewDue(at: now) == true }
+            .count
+        let warmup = baseWarmup == 0 ? 0 : min(baseWarmup, max(1, dueWarmupCount))
+
+        let sessionFocusNumber = dailyPractice.kind == .reviewTest ? nil : profile.currentFocusNumber
+
+        return SessionPlan(
+            warmupLength: warmup,
+            introducedNewFocusLetter: introducedNewFocus,
+            introducedFocusTarget: introducedFocusTarget,
+            dayStreakCount: profile.dailyStreakCount,
+            dayStreakIncreased: streakIncreased,
+            focusLetter: sessionFocusNumber,
+            focusTarget: sessionFocusNumber.map(FocusTarget.number),
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: profile.numberFocusScaffoldingLevel,
+            dailyGoalTarget: dailyPractice.goalTarget,
+            dailyGoalStartCount: dailyPractice.startCount,
+            dailyGoalClaimedCount: dailyPractice.claimedWinnerCount,
+            dailyPracticeKind: dailyPractice.kind,
+            weeklyReviewLetters: dailyPractice.weeklyReviewLetters,
+            dailySpotlightLetter: dailySpotlightNumber
+        )
+    }
+
+    /// Numbers twin of `resolveDailyPractice`, backed entirely by the number
+    /// cycle counters (`numberDailyPractice*`, `activeWeeklyNumberAssessment`,
+    /// `completedNumberSessionsInCycle`, `numberLearningCycleStartDay`).
+    private func resolveNumberDailyPractice(
+        profile: inout Profile,
+        today: LocalDay,
+        commit: Bool,
+        clockMovedBackward: Bool
+    ) -> DailyPracticePlanning {
+        var startCount = profile.numberDailyPracticeCount(on: today)
+
+        if !clockMovedBackward {
+            if profile.numberDailyPracticeDay != today {
+                startCount = 0
+                if commit {
+                    profile.numberDailyPracticeDay = today
+                    profile.numberDailyPracticeAttempts = 0
+                    profile.numberDailyPracticeWinnerClaimedDay = today
+                    profile.numberDailyPracticeWinnerClaimedMilestone = 0
+                }
+            }
+            let claimedWinnerCount = profile.numberDailyPracticeWinnerClaimedCount(on: today)
+
+            if let assessment = profile.activeWeeklyNumberAssessment,
+               assessment.isCompleted,
+               assessment.completedOn != today {
+                profile.activeWeeklyNumberAssessment = nil
+                profile.weeklyIntroducedNumbers = []
+                profile.completedNumberSessionsInCycle = 0
+                profile.numberLearningCycleStartDay = today
+            }
+
+            normalizeActiveWeeklyNumberAssessment(profile: &profile, today: today)
+
+            if let assessment = profile.activeWeeklyNumberAssessment {
+                return DailyPracticePlanning(
+                    kind: .reviewTest,
+                    goalTarget: assessment.dailyGoalTarget,
+                    startCount: weeklyAssessmentStartCount(for: assessment, dailyPracticeStartCount: startCount),
+                    claimedWinnerCount: claimedWinnerCount,
+                    weeklyReviewLetters: assessment.cohortLetters,
+                    scheduledReviewDay: assessment.scheduledFor
+                )
+            }
+
+            if let cycleStart = profile.numberLearningCycleStartDay {
+                if today.daysSince(cycleStart) < 0 {
+                    profile.numberLearningCycleStartDay = today
+                }
+            } else {
+                profile.numberLearningCycleStartDay = today
+            }
+
+            let reviewDue = profile.completedNumberSessionsInCycle
+                >= completedLetterSessionsBeforeAssessment
+            let assessmentPreview = reviewDue
+                ? profile.buildAdaptiveWeeklyNumberAssessment(scheduledFor: today, startedOn: today, legacyDailyGoal: reviewTestDailyGoal)
+                : nil
+            let reviewNumbers = assessmentPreview?.cohortLetters ?? []
+            let kind: DailyPracticeKind = reviewDue && !reviewNumbers.isEmpty ? .reviewTest : .introduction
+
+            return DailyPracticePlanning(
+                kind: kind,
+                goalTarget: kind == .reviewTest ? (assessmentPreview?.dailyGoalTarget ?? reviewTestDailyGoal) : introductionDailyGoal,
+                startCount: startCount,
+                claimedWinnerCount: claimedWinnerCount,
+                weeklyReviewLetters: kind == .reviewTest ? reviewNumbers : [],
+                scheduledReviewDay: kind == .reviewTest ? today : nil
+            )
+        }
+
+        let claimedWinnerCount = profile.numberDailyPracticeWinnerClaimedCount(on: today)
+
+        normalizeActiveWeeklyNumberAssessment(profile: &profile, today: today)
+
+        if let assessment = profile.activeWeeklyNumberAssessment {
+            return DailyPracticePlanning(
+                kind: .reviewTest,
+                goalTarget: assessment.dailyGoalTarget,
+                startCount: weeklyAssessmentStartCount(for: assessment, dailyPracticeStartCount: startCount),
+                claimedWinnerCount: claimedWinnerCount,
+                weeklyReviewLetters: assessment.cohortLetters,
+                scheduledReviewDay: assessment.scheduledFor
+            )
+        }
+
+        let reviewDue = profile.completedNumberSessionsInCycle
+            >= completedLetterSessionsBeforeAssessment
+        let assessmentPreview = reviewDue
+            ? profile.buildAdaptiveWeeklyNumberAssessment(scheduledFor: today, startedOn: today, legacyDailyGoal: reviewTestDailyGoal)
+            : nil
+        let reviewNumbers = assessmentPreview?.cohortLetters ?? []
+        let kind: DailyPracticeKind = reviewDue && !reviewNumbers.isEmpty ? .reviewTest : .introduction
+        return DailyPracticePlanning(
+            kind: kind,
+            goalTarget: kind == .reviewTest ? (assessmentPreview?.dailyGoalTarget ?? reviewTestDailyGoal) : introductionDailyGoal,
+            startCount: startCount,
+            claimedWinnerCount: claimedWinnerCount,
+            weeklyReviewLetters: kind == .reviewTest ? reviewNumbers : [],
+            scheduledReviewDay: kind == .reviewTest ? today : nil
+        )
+    }
+
+    private func normalizeActiveWeeklyNumberAssessment(profile: inout Profile, today: LocalDay) {
+        guard var assessment = profile.activeWeeklyNumberAssessment else { return }
+        assessment.enforceQuestionLimit()
+        profile.activeWeeklyNumberAssessment = assessment
+        completeWeeklyNumberAssessmentIfNeeded(profile: &profile, today: today)
+    }
+
+    private func startWeeklyNumberAssessmentIfNeeded(
+        profile: inout Profile,
+        scheduledFor: LocalDay?,
+        cohortNumbers: [String],
+        today: LocalDay
+    ) {
+        guard profile.activeWeeklyNumberAssessment == nil,
+              let scheduledFor,
+              !cohortNumbers.isEmpty else {
+            return
+        }
+        let assessment = profile.buildAdaptiveWeeklyNumberAssessment(
+            scheduledFor: scheduledFor,
+            startedOn: today,
+            legacyDailyGoal: reviewTestDailyGoal
+        )
+        guard !assessment.cohortLetters.isEmpty else { return }
+        profile.activeWeeklyNumberAssessment = assessment
+    }
+
+    private func completeWeeklyNumberAssessmentIfNeeded(profile: inout Profile, today: LocalDay) {
+        guard let assessment = profile.activeWeeklyNumberAssessment,
+              !assessment.isCompleted else {
+            return
+        }
+        let attemptsToday = profile.numberDailyPracticeCount(on: today)
+        let shouldComplete: Bool
+        switch assessment.strategy {
+        case .legacyCohort:
+            shouldComplete = attemptsToday >= assessment.dailyGoalTarget
+        case .adaptiveAudit:
+            shouldComplete = assessment.isAssessmentResolved
+                || (assessment.hasCoveredEveryLetter && assessment.independentAssessmentAttempts >= assessment.hardRoundCap)
+        }
+        guard shouldComplete else { return }
+        finalizeActiveWeeklyNumberAssessment(profile: &profile, today: today)
+    }
+
+    private func finalizeActiveWeeklyNumberAssessment(profile: inout Profile, today: LocalDay) {
+        guard var assessment = profile.activeWeeklyNumberAssessment,
+              !assessment.isCompleted else {
+            return
+        }
+        assessment.complete(on: today)
+        let now = Date()
+        for number in assessment.needsReviewLetters {
+            guard var stat = profile.numberStats[number] else { continue }
+            stat.scheduleFollowUp(afterDays: 1, from: now)
+            profile.numberStats[number] = stat
+        }
+        for number in assessment.watchLetters {
+            guard var stat = profile.numberStats[number] else { continue }
+            stat.scheduleFollowUp(afterDays: 3, from: now)
+            profile.numberStats[number] = stat
+        }
+        profile.activeWeeklyNumberAssessment = assessment
+        profile.recentWeeklyNumberAssessments.append(assessment)
+        if profile.recentWeeklyNumberAssessments.count > recentWeeklyAssessmentLimit {
+            profile.recentWeeklyNumberAssessments.removeFirst(profile.recentWeeklyNumberAssessments.count - recentWeeklyAssessmentLimit)
+        }
+        profile.weeklyIntroducedNumbers = []
+        profile.completedNumberSessionsInCycle = 0
+        profile.numberLearningCycleStartDay = today
+    }
+
+    private func shouldPauseStuckNumberFocus(profile: Profile) -> Bool {
+        guard let focus = profile.currentFocusNumber,
+              let stat = profile.numberStats[focus],
+              profile.numberFocusActiveDays >= 8 else {
+            return false
+        }
+        return stat.recentAccuracy(window: 5) < 0.5
+    }
+
     private func isSyllableLayerEligible(
         profile: Profile,
         today: LocalDay,
@@ -785,6 +1240,24 @@ class ProfileManager: ObservableObject {
         )
     }
 
+    /// Extra-practice session for a single number. Reuses
+    /// `SessionMode.extraPractice` — the engine disambiguates the key via
+    /// `plan.primaryLayer == .numbers`.
+    func startPracticeSession(profileId: UUID, number: String) -> SessionPlan {
+        let streak = profiles.first(where: { $0.id == profileId })?.dailyStreakCount ?? 0
+        return SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: streak,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: 0,
+            mode: .extraPractice(letter: number)
+        )
+    }
+
     /// Called when the player exits the game (any reason). Persists the best
     /// session streak and forces an immediate save — session-end is an
     /// important moment to checkpoint.
@@ -797,9 +1270,42 @@ class ProfileManager: ObservableObject {
         saveProfilesImmediately()
     }
 
-    func claimDailyPracticeWinner(profileId: UUID, milestone: Int) {
+    func claimDailyPracticeWinner(profileId: UUID, milestone: Int, layer: LearningLayer = .letters) {
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
         var profile = profiles[index]
+
+        if layer == .numbers {
+            // Numbers twin: the number Winner counters and the number cycle
+            // counter move here and only here — `completedNumberSessionsInCycle`
+            // has no other writer besides the assessment/cycle resets.
+            let previousClaimed = profile.numberDailyPracticeWinnerClaimedCount()
+            let wasAssessmentActive = profile.activeWeeklyNumberAssessment != nil
+            profile.claimNumberDailyPracticeWinner(milestone: milestone)
+            if !wasAssessmentActive {
+                let previouslyCompleted = previousClaimed / introductionDailyGoal
+                let nowCompleted = milestone / introductionDailyGoal
+                let newlyCompleted = max(0, nowCompleted - previouslyCompleted)
+                if newlyCompleted > 0 {
+                    if profile.numberLearningCycleStartDay == nil {
+                        profile.numberLearningCycleStartDay = LocalDay.today()
+                    }
+                    profile.completedNumberSessionsInCycle = min(
+                        completedLetterSessionsBeforeAssessment,
+                        profile.completedNumberSessionsInCycle + newlyCompleted
+                    )
+                }
+            }
+            if let assessment = profile.activeWeeklyNumberAssessment,
+               !assessment.isCompleted,
+               milestone >= assessment.dailyGoalTarget {
+                finalizeActiveWeeklyNumberAssessment(profile: &profile, today: LocalDay.today())
+            }
+            profile.markModified()
+            profiles[index] = profile
+            saveProfilesImmediately()
+            return
+        }
+
         let previousClaimedMilestone = profile.dailyPracticeWinnerClaimedCount()
         let wasAssessmentActive = profile.activeWeeklyAssessment != nil
         profile.claimDailyPracticeWinner(milestone: milestone)
@@ -1117,6 +1623,7 @@ class ProfileManager: ObservableObject {
         let event = RoundEvent(
             date: Date(),
             target: letter,
+            unitKind: .letter,
             options: optionsShown,
             selected: selectedKey,
             wasCorrect: wasCorrect,
@@ -1247,6 +1754,8 @@ class ProfileManager: ObservableObject {
             )
         case .syllable, .word:
             break
+        case .number:
+            break
         }
 
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else {
@@ -1258,6 +1767,7 @@ class ProfileManager: ObservableObject {
         let shouldCountForLearning = !discountedForImpulse && !context.isAssistedForMastery
         var graduatedThisCall: String?
         var leveledUpTo: AlphabetLevel?
+        var numberBandUp: NumberInstructionalBand?
         let selectedKey = wasCorrect ? target.storageKey : (selectedWrongTarget?.storageKey ?? "")
 
         func updateLevelReceipts(on profile: inout Profile) {
@@ -1373,6 +1883,117 @@ class ProfileManager: ObservableObject {
                 profile.lastNewLetterDay = LocalDay.today()
                 updateLevelReceipts(on: &profile)
             }
+        case .number(let number):
+            // Numbers twin of the letters path. Eligibility comes from the
+            // number curriculum only — LetterDifficulty is never consulted —
+            // and there are NO alphabetLevel / celebratedAlphabetLevels /
+            // syllablesUnlockedAt side effects here.
+            guard NumberDifficulty.isEligibleTarget(number) else {
+                return RecordedAnswer()
+            }
+            var stat = profile.numberStats[number] ?? NumberStat()
+            let oldIsKnown = stat.isKnown
+            if asTarget {
+                if shouldCountForLearning {
+                    stat.recordTargetAttempt(correct: wasCorrect, responseTime: responseTime)
+                } else {
+                    // Impulse-discounted or assisted: exposure only, but keep
+                    // the speed signal (same rule as the letters path).
+                    stat.recordDistractorExposure()
+                    if let rt = responseTime {
+                        let cleaned = max(0, rt)
+                        if cleaned < NumberStat.distractionResponseCutoff {
+                            stat.recentResponseTimes.append(cleaned)
+                            if stat.recentResponseTimes.count > NumberStat.responseTimeWindow {
+                                let drop = stat.recentResponseTimes.count - NumberStat.responseTimeWindow
+                                stat.recentResponseTimes.removeFirst(drop)
+                            }
+                        }
+                    }
+                }
+                if didReplayPrompt { stat.recordPromptReplay() }
+                if !wasCorrect, let wrong = selectedWrongTarget {
+                    if shouldCountForLearning {
+                        stat.recordConfusion(with: wrong.rawKey)
+                    } else if discountedForImpulse {
+                        stat.recordImpulsiveSelection(of: wrong.rawKey)
+                    } else {
+                        stat.recordConfusion(with: wrong.rawKey)
+                    }
+                }
+                if !context.isAssistedForMastery, shouldCountForLearning {
+                    for option in Set(optionsShown.map(\.rawKey)) where option != number {
+                        guard NumberDifficulty.isEligibleTarget(option) else { continue }
+                        let wasPairMistake = !wasCorrect
+                            && mistakeType == .confusion
+                            && selectedWrongTarget?.rawKey == option
+                        stat.recordConfusionOpportunity(with: option, wasMistake: wasPairMistake)
+                    }
+                }
+                profile.introducedNumbers.insert(number)
+                profile.recordNumberDailyTargetAsk(number: number)
+            } else {
+                stat.recordDistractorExposure()
+            }
+            if asTarget && oldIsKnown && !stat.isKnown {
+                stat.wasKnownBefore = true
+                stat.demotedAt = Date()
+            }
+            profile.numberStats[number] = stat
+            if asTarget,
+               !context.isAssistedForMastery,
+               shouldCountForLearning,
+               [4, 6, 8].contains(optionsShown.count) {
+                var gridStat = profile.numberGridPerformanceStats[optionsShown.count] ?? GridPerformanceStat()
+                gridStat.record(correct: wasCorrect)
+                profile.numberGridPerformanceStats[optionsShown.count] = gridStat
+            }
+            if asTarget && countsTowardDailyPractice {
+                let isWeeklyReviewTest = profile.activeWeeklyNumberAssessment != nil
+                if wasCorrect || isWeeklyReviewTest {
+                    profile.incrementNumberDailyPractice()
+                }
+                if context == .independent,
+                   shouldCountForLearning,
+                   intent == .weeklyAssessment {
+                    profile.activeWeeklyNumberAssessment?.recordIndependentAttempt(
+                        letter: number,
+                        wasCorrect: wasCorrect,
+                        responseTime: responseTime
+                    )
+                }
+                completeWeeklyNumberAssessmentIfNeeded(profile: &profile, today: LocalDay.today())
+            }
+
+            if asTarget,
+               shouldCountForLearning,
+               profile.introducedNumbers.contains(number),
+               !profile.everMasteredNumbers.contains(number),
+               stat.isFocusGraduated {
+                graduatedThisCall = number
+                profile.everMasteredNumbers.insert(number)
+                if profile.currentFocusNumber == number {
+                    profile.currentFocusNumber = nil
+                    profile.numberFocusStartedDay = nil
+                    profile.numberFocusPracticedDays = []
+                    // Graduation consumes today's number-introduction quota,
+                    // matching the letters rule.
+                    profile.lastNewNumberDay = LocalDay.today()
+                }
+
+                let afterBand = NumberInstructionalBand.from(
+                    introducedCount: profile.introducedNumbers.count,
+                    knownCount: profile.knownNumbers.count,
+                    strongKnownCount: profile.strongKnownNumbers.count
+                )
+                if afterBand > profile.highestNumberBandEverReached {
+                    profile.highestNumberBandEverReached = afterBand
+                }
+                if !profile.celebratedNumberBands.contains(afterBand) {
+                    profile.celebratedNumberBands.insert(afterBand)
+                    numberBandUp = afterBand
+                }
+            }
         }
 
         let event = RoundEvent(
@@ -1403,7 +2024,11 @@ class ProfileManager: ObservableObject {
         profile.markModified()
         profiles[index] = profile
         saveProfilesImmediately()
-        return RecordedAnswer(focusGraduated: graduatedThisCall, leveledUp: leveledUpTo)
+        return RecordedAnswer(
+            focusGraduated: graduatedThisCall,
+            leveledUp: leveledUpTo,
+            numberBandUp: numberBandUp
+        )
     }
 
     /// Records a *distractor* exposure (the letter appeared on screen but
@@ -1470,6 +2095,16 @@ class ProfileManager: ObservableObject {
             var stat = profile.wordStats[word] ?? WordStat()
             stat.recordDistractorExposure()
             profile.wordStats[word] = stat
+            profile.markModified()
+            profiles[index] = profile
+            saveProfilesImmediately()
+        case .number(let number):
+            guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
+            var profile = profiles[index]
+            guard NumberDifficulty.isEligibleTarget(number) else { return }
+            var stat = profile.numberStats[number] ?? NumberStat()
+            stat.recordDistractorExposure()
+            profile.numberStats[number] = stat
             profile.markModified()
             profiles[index] = profile
             saveProfilesImmediately()
@@ -1686,4 +2321,8 @@ class ProfileManager: ObservableObject {
 struct RecordedAnswer: Equatable {
     var focusGraduated: String? = nil
     var leveledUp: AlphabetLevel? = nil
+    /// First-ever celebration of a `NumberInstructionalBand` (numbers layer
+    /// twin of `leveledUp`); set only when a number graduation pushes the
+    /// profile into a not-yet-celebrated band.
+    var numberBandUp: NumberInstructionalBand? = nil
 }

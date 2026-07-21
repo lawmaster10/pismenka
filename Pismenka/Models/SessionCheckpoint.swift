@@ -19,10 +19,45 @@ struct SessionCheckpointEnvelope: Codable, Equatable {
     var schemaVersion: Int = SessionCheckpointEnvelope.currentSchemaVersion
     var profileId: UUID
     var kind: SessionCheckpointKind
+    /// Which learning layer this checkpoint belongs to. Checkpoints written
+    /// before per-layer slots existed decode as `.letters`.
+    var learningLayer: LearningLayer = .letters
     var savedAt: Date
     var sessionPlan: SessionPlan?
     var calibration: CalibrationSnapshot?
     var game: GameEngineSnapshot?
+
+    init(
+        schemaVersion: Int = SessionCheckpointEnvelope.currentSchemaVersion,
+        profileId: UUID,
+        kind: SessionCheckpointKind,
+        learningLayer: LearningLayer = .letters,
+        savedAt: Date,
+        sessionPlan: SessionPlan? = nil,
+        calibration: CalibrationSnapshot? = nil,
+        game: GameEngineSnapshot? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.profileId = profileId
+        self.kind = kind
+        self.learningLayer = learningLayer
+        self.savedAt = savedAt
+        self.sessionPlan = sessionPlan
+        self.calibration = calibration
+        self.game = game
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        profileId = try c.decode(UUID.self, forKey: .profileId)
+        kind = try c.decode(SessionCheckpointKind.self, forKey: .kind)
+        learningLayer = try c.decodeIfPresent(LearningLayer.self, forKey: .learningLayer) ?? .letters
+        savedAt = try c.decode(Date.self, forKey: .savedAt)
+        sessionPlan = try c.decodeIfPresent(SessionPlan.self, forKey: .sessionPlan)
+        calibration = try c.decodeIfPresent(CalibrationSnapshot.self, forKey: .calibration)
+        game = try c.decodeIfPresent(GameEngineSnapshot.self, forKey: .game)
+    }
 }
 
 struct CalibrationSnapshot: Codable, Equatable {
@@ -33,6 +68,45 @@ struct CalibrationSnapshot: Codable, Equatable {
     var showIntro: Bool
     var showFinale: Bool
     var advanceToNextRoundOnRestore: Bool
+    /// Layer the calibration ran for. Pre-layer snapshots decode as `.letters`.
+    var learningLayer: LearningLayer = .letters
+
+    private enum CodingKeys: String, CodingKey {
+        case schedule, currentIndex, displayedLetters, roundsAnswered
+        case showIntro, showFinale, advanceToNextRoundOnRestore, learningLayer
+    }
+
+    init(
+        schedule: [String],
+        currentIndex: Int,
+        displayedLetters: [String],
+        roundsAnswered: Int,
+        showIntro: Bool,
+        showFinale: Bool,
+        advanceToNextRoundOnRestore: Bool,
+        learningLayer: LearningLayer = .letters
+    ) {
+        self.schedule = schedule
+        self.currentIndex = currentIndex
+        self.displayedLetters = displayedLetters
+        self.roundsAnswered = roundsAnswered
+        self.showIntro = showIntro
+        self.showFinale = showFinale
+        self.advanceToNextRoundOnRestore = advanceToNextRoundOnRestore
+        self.learningLayer = learningLayer
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schedule = try c.decode([String].self, forKey: .schedule)
+        currentIndex = try c.decode(Int.self, forKey: .currentIndex)
+        displayedLetters = try c.decode([String].self, forKey: .displayedLetters)
+        roundsAnswered = try c.decode(Int.self, forKey: .roundsAnswered)
+        showIntro = try c.decode(Bool.self, forKey: .showIntro)
+        showFinale = try c.decode(Bool.self, forKey: .showFinale)
+        advanceToNextRoundOnRestore = try c.decode(Bool.self, forKey: .advanceToNextRoundOnRestore)
+        learningLayer = try c.decodeIfPresent(LearningLayer.self, forKey: .learningLayer) ?? .letters
+    }
 }
 
 struct RescueItemSnapshot: Codable, Equatable {
@@ -76,6 +150,11 @@ struct GameEngineSnapshot: Codable, Equatable {
     var currentRoundPhaseOverride: RoundPhase?
     var instructionalBand: AlphabetLevel? = nil
     var letterOptionsPerRound: Int? = nil
+    /// Numbers-layer band frozen at session start; `nil` for letter sessions
+    /// and pre-numbers checkpoints.
+    var numberBand: NumberInstructionalBand? = nil
+    /// Numbers-layer grid size frozen at session start.
+    var numberOptionsPerRound: Int? = nil
     var sessionPlayableWords: [WordUnit]? = nil
 
     var liveDifficulty: LiveDifficulty

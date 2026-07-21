@@ -450,6 +450,21 @@ struct Profile: Identifiable, Codable, Equatable {
     /// True after the one-time calibration flow has finished.
     var hasCompletedCalibration: Bool
 
+    /// Per-number mastery stats, keyed by number string ("0"…"100").
+    var numberStats: [String: NumberStat]
+
+    /// Number storage-keys intentionally introduced as targets or focus.
+    var introducedNumbers: Set<String>
+
+    /// Lifetime set of numbers that have ever satisfied focus graduation.
+    var everMasteredNumbers: Set<String>
+
+    /// The number currently being drilled, if any.
+    var currentFocusNumber: String?
+
+    /// True after the one-time numbers calibration flow has finished.
+    var hasCompletedNumberCalibration: Bool
+
     /// The letter currently being drilled, if any. Cleared when the letter
     /// graduates (LetterStat.isFocusGraduated) or when the child reaches expert.
     var currentFocusLetter: String?
@@ -470,6 +485,22 @@ struct Profile: Identifiable, Codable, Equatable {
     /// values is self-validating — duplicates collapse via `Set` semantics,
     /// and the scaffolding ladder is always recoverable by counting the set.
     var focusPracticedDays: Set<LocalDay>
+
+    /// Local day the current number focus was first introduced.
+    var numberFocusStartedDay: LocalDay?
+
+    /// Local-calendar days on which the current number focus has been practiced.
+    var numberFocusPracticedDays: Set<LocalDay>
+
+    /// Calendar gate: at most one number focus introduction per local day.
+    var lastNewNumberDay: LocalDay?
+
+    /// Focus numbers paused by the stuck-focus escape hatch.
+    var pausedFocusNumbers: Set<String>
+    var pausedFocusNumberDays: [String: LocalDay]
+
+    /// Provenance for the most recent number-focus pick.
+    var lastNumberFocusSelection: FocusSelectionReason?
 
     /// Calendar gate: at most one focus introduction per local-calendar day.
     /// The stored key is `lastNewLetterDay` for migration compatibility, but
@@ -499,6 +530,15 @@ struct Profile: Identifiable, Codable, Equatable {
     var dailyTargetAskDay: LocalDay?
     var dailyTargetAskCounts: [String: Int]
 
+    var numberDailyPracticeDay: LocalDay?
+    var numberDailyPracticeAttempts: Int
+    var numberDailyPracticeWinnerClaimedDay: LocalDay?
+    var numberDailyPracticeWinnerClaimedMilestone: Int
+    var numberCameoExposureDay: LocalDay?
+    var numberCameoExposuresToday: Int
+    var numberDailyTargetAskDay: LocalDay?
+    var numberDailyTargetAskCounts: [String: Int]
+
     /// Practice-count rhythm state: after six completed 25-answer letter
     /// sessions, the next session is a retention check. The cohort set tracks
     /// letters intentionally introduced during that practice cycle.
@@ -507,6 +547,12 @@ struct Profile: Identifiable, Codable, Equatable {
     var completedLetterSessionsInCycle: Int
     var activeWeeklyAssessment: WeeklyLetterAssessment?
     var recentWeeklyAssessments: [WeeklyLetterAssessment]
+
+    var numberLearningCycleStartDay: LocalDay?
+    var weeklyIntroducedNumbers: Set<String>
+    var completedNumberSessionsInCycle: Int
+    var activeWeeklyNumberAssessment: WeeklyNumberAssessment?
+    var recentWeeklyNumberAssessments: [WeeklyNumberAssessment]
 
     /// Last calendar day the child played; used for the "is today a new day?"
     /// check that powers the day streak and the focus-active-days bump.
@@ -643,6 +689,15 @@ struct Profile: Identifiable, Codable, Equatable {
     /// many alphabet letters happen to be known.
     var gridPerformanceStats: [Int: GridPerformanceStat]
 
+    var numberGridPerformanceStats: [Int: GridPerformanceStat]
+    var lastFrozenNumberOptionsPerRound: Int?
+
+    /// Highest `NumberInstructionalBand` ever reached. Monotonic trophy.
+    var highestNumberBandEverReached: NumberInstructionalBand
+
+    /// Bands for which a level-up celebration has already been shown.
+    var celebratedNumberBands: Set<NumberInstructionalBand>
+
     static let maxNameLength = 8
     static let focusPauseCooldownDays = 7
 
@@ -718,9 +773,57 @@ struct Profile: Identifiable, Codable, Equatable {
         dailyPracticeWinnerClaimedMilestone = max(dailyPracticeWinnerClaimedMilestone, milestone)
     }
 
+    func numberDailyPracticeCount(on day: LocalDay = LocalDay.today()) -> Int {
+        numberDailyPracticeDay == day ? numberDailyPracticeAttempts : 0
+    }
+
+    func numberDailyPracticeWinnerClaimedCount(on day: LocalDay = LocalDay.today()) -> Int {
+        numberDailyPracticeWinnerClaimedDay == day ? max(0, numberDailyPracticeWinnerClaimedMilestone) : 0
+    }
+
+    mutating func incrementNumberDailyPractice(on day: LocalDay = LocalDay.today()) {
+        if numberDailyPracticeDay != day {
+            numberDailyPracticeDay = day
+            numberDailyPracticeAttempts = 0
+            numberDailyPracticeWinnerClaimedDay = day
+            numberDailyPracticeWinnerClaimedMilestone = 0
+        }
+        numberDailyPracticeAttempts += 1
+    }
+
+    mutating func claimNumberDailyPracticeWinner(milestone: Int, on day: LocalDay = LocalDay.today()) {
+        guard milestone > 0 else { return }
+        if numberDailyPracticeWinnerClaimedDay != day {
+            numberDailyPracticeWinnerClaimedDay = day
+            numberDailyPracticeWinnerClaimedMilestone = 0
+        }
+        numberDailyPracticeWinnerClaimedMilestone = max(numberDailyPracticeWinnerClaimedMilestone, milestone)
+    }
+
+    /// Per-number target-ask counts for `day`; empty when the stored counts
+    /// belong to an earlier local day. Parallel to `dailyTargetAskCounts(on:)`.
+    func numberDailyTargetAskCounts(on day: LocalDay = LocalDay.today()) -> [String: Int] {
+        numberDailyTargetAskDay == day ? numberDailyTargetAskCounts : [:]
+    }
+
+    mutating func recordNumberDailyTargetAsk(number: String, on day: LocalDay = LocalDay.today()) {
+        if numberDailyTargetAskDay != day {
+            numberDailyTargetAskDay = day
+            numberDailyTargetAskCounts = [:]
+        }
+        numberDailyTargetAskCounts[number, default: 0] += 1
+    }
+
     func activePausedFocusLetters(on day: LocalDay = LocalDay.today()) -> Set<String> {
         Set(pausedFocusLetters.filter { letter in
             guard let pausedAt = pausedFocusLetterDays[letter] else { return true }
+            return day.daysSince(pausedAt) < Self.focusPauseCooldownDays
+        })
+    }
+
+    func activePausedFocusNumbers(on day: LocalDay = LocalDay.today()) -> Set<String> {
+        Set(pausedFocusNumbers.filter { number in
+            guard let pausedAt = pausedFocusNumberDays[number] else { return true }
             return day.daysSince(pausedAt) < Self.focusPauseCooldownDays
         })
     }
@@ -729,6 +832,12 @@ struct Profile: Identifiable, Codable, Equatable {
         let active = activePausedFocusLetters(on: day)
         pausedFocusLetters.formIntersection(active)
         pausedFocusLetterDays = pausedFocusLetterDays.filter { active.contains($0.key) }
+    }
+
+    mutating func clearExpiredPausedFocusNumbers(on day: LocalDay = LocalDay.today()) {
+        let active = activePausedFocusNumbers(on: day)
+        pausedFocusNumbers.formIntersection(active)
+        pausedFocusNumberDays = pausedFocusNumberDays.filter { active.contains($0.key) }
     }
 
     init(
@@ -741,11 +850,22 @@ struct Profile: Identifiable, Codable, Equatable {
         syllableStats: [String: SyllableStat] = [:],
         wordStats: [String: WordStat] = [:],
         hasCompletedCalibration: Bool = false,
+        numberStats: [String: NumberStat] = [:],
+        introducedNumbers: Set<String> = [],
+        everMasteredNumbers: Set<String> = [],
+        currentFocusNumber: String? = nil,
+        hasCompletedNumberCalibration: Bool = false,
         currentFocusLetter: String? = nil,
         currentSyllableFocus: String? = nil,
         currentWordFocus: String? = nil,
         focusStartedDay: LocalDay? = nil,
         focusPracticedDays: Set<LocalDay> = [],
+        numberFocusStartedDay: LocalDay? = nil,
+        numberFocusPracticedDays: Set<LocalDay> = [],
+        lastNewNumberDay: LocalDay? = nil,
+        pausedFocusNumbers: Set<String> = [],
+        pausedFocusNumberDays: [String: LocalDay] = [:],
+        lastNumberFocusSelection: FocusSelectionReason? = nil,
         syllablesUnlockedAt: LocalDay? = nil,
         wordsUnlockedAt: LocalDay? = nil,
         hasCompletedSyllableOnboarding: Bool = false,
@@ -762,11 +882,24 @@ struct Profile: Identifiable, Codable, Equatable {
         dailyPracticeWinnerClaimedMilestone: Int = 0,
         dailyTargetAskDay: LocalDay? = nil,
         dailyTargetAskCounts: [String: Int] = [:],
+        numberDailyPracticeDay: LocalDay? = nil,
+        numberDailyPracticeAttempts: Int = 0,
+        numberDailyPracticeWinnerClaimedDay: LocalDay? = nil,
+        numberDailyPracticeWinnerClaimedMilestone: Int = 0,
+        numberCameoExposureDay: LocalDay? = nil,
+        numberCameoExposuresToday: Int = 0,
+        numberDailyTargetAskDay: LocalDay? = nil,
+        numberDailyTargetAskCounts: [String: Int] = [:],
         learningCycleStartDay: LocalDay? = nil,
         weeklyIntroducedLetters: Set<String> = [],
         completedLetterSessionsInCycle: Int = 0,
         activeWeeklyAssessment: WeeklyLetterAssessment? = nil,
         recentWeeklyAssessments: [WeeklyLetterAssessment] = [],
+        numberLearningCycleStartDay: LocalDay? = nil,
+        weeklyIntroducedNumbers: Set<String> = [],
+        completedNumberSessionsInCycle: Int = 0,
+        activeWeeklyNumberAssessment: WeeklyNumberAssessment? = nil,
+        recentWeeklyNumberAssessments: [WeeklyNumberAssessment] = [],
         lastSessionDay: LocalDay? = nil,
         dailyStreakCount: Int = 0,
         bestDailyStreak: Int = 0,
@@ -785,6 +918,10 @@ struct Profile: Identifiable, Codable, Equatable {
         celebratedAlphabetLevels: Set<AlphabetLevel> = [.novice],
         lastFrozenLetterOptionsPerRound: Int? = nil,
         gridPerformanceStats: [Int: GridPerformanceStat] = [:],
+        numberGridPerformanceStats: [Int: GridPerformanceStat] = [:],
+        lastFrozenNumberOptionsPerRound: Int? = nil,
+        highestNumberBandEverReached: NumberInstructionalBand = .beginner,
+        celebratedNumberBands: Set<NumberInstructionalBand> = [.beginner],
         parentNote: String? = nil
     ) {
         self.id = id
@@ -796,11 +933,22 @@ struct Profile: Identifiable, Codable, Equatable {
         self.syllableStats = syllableStats
         self.wordStats = wordStats
         self.hasCompletedCalibration = hasCompletedCalibration
+        self.numberStats = numberStats
+        self.introducedNumbers = introducedNumbers
+        self.everMasteredNumbers = everMasteredNumbers
+        self.currentFocusNumber = currentFocusNumber
+        self.hasCompletedNumberCalibration = hasCompletedNumberCalibration
         self.currentFocusLetter = currentFocusLetter
         self.currentSyllableFocus = currentSyllableFocus
         self.currentWordFocus = currentWordFocus
         self.focusStartedDay = focusStartedDay
         self.focusPracticedDays = focusPracticedDays
+        self.numberFocusStartedDay = numberFocusStartedDay
+        self.numberFocusPracticedDays = numberFocusPracticedDays
+        self.lastNewNumberDay = lastNewNumberDay
+        self.pausedFocusNumbers = pausedFocusNumbers
+        self.pausedFocusNumberDays = pausedFocusNumberDays
+        self.lastNumberFocusSelection = lastNumberFocusSelection
         self.syllablesUnlockedAt = syllablesUnlockedAt
         self.wordsUnlockedAt = wordsUnlockedAt
         self.hasCompletedSyllableOnboarding = hasCompletedSyllableOnboarding
@@ -817,11 +965,24 @@ struct Profile: Identifiable, Codable, Equatable {
         self.dailyPracticeWinnerClaimedMilestone = dailyPracticeWinnerClaimedMilestone
         self.dailyTargetAskDay = dailyTargetAskDay
         self.dailyTargetAskCounts = dailyTargetAskCounts
+        self.numberDailyPracticeDay = numberDailyPracticeDay
+        self.numberDailyPracticeAttempts = numberDailyPracticeAttempts
+        self.numberDailyPracticeWinnerClaimedDay = numberDailyPracticeWinnerClaimedDay
+        self.numberDailyPracticeWinnerClaimedMilestone = numberDailyPracticeWinnerClaimedMilestone
+        self.numberCameoExposureDay = numberCameoExposureDay
+        self.numberCameoExposuresToday = numberCameoExposuresToday
+        self.numberDailyTargetAskDay = numberDailyTargetAskDay
+        self.numberDailyTargetAskCounts = numberDailyTargetAskCounts
         self.learningCycleStartDay = learningCycleStartDay
         self.weeklyIntroducedLetters = weeklyIntroducedLetters
         self.completedLetterSessionsInCycle = max(0, completedLetterSessionsInCycle)
         self.activeWeeklyAssessment = activeWeeklyAssessment
         self.recentWeeklyAssessments = recentWeeklyAssessments
+        self.numberLearningCycleStartDay = numberLearningCycleStartDay
+        self.weeklyIntroducedNumbers = weeklyIntroducedNumbers
+        self.completedNumberSessionsInCycle = max(0, completedNumberSessionsInCycle)
+        self.activeWeeklyNumberAssessment = activeWeeklyNumberAssessment
+        self.recentWeeklyNumberAssessments = recentWeeklyNumberAssessments
         self.lastSessionDay = lastSessionDay
         self.dailyStreakCount = dailyStreakCount
         self.bestDailyStreak = bestDailyStreak
@@ -840,6 +1001,10 @@ struct Profile: Identifiable, Codable, Equatable {
         self.celebratedAlphabetLevels = celebratedAlphabetLevels
         self.lastFrozenLetterOptionsPerRound = lastFrozenLetterOptionsPerRound
         self.gridPerformanceStats = gridPerformanceStats
+        self.numberGridPerformanceStats = numberGridPerformanceStats
+        self.lastFrozenNumberOptionsPerRound = lastFrozenNumberOptionsPerRound
+        self.highestNumberBandEverReached = highestNumberBandEverReached
+        self.celebratedNumberBands = celebratedNumberBands
         self.parentNote = parentNote
     }
 
@@ -870,6 +1035,22 @@ struct Profile: Identifiable, Codable, Equatable {
         syllableStats = try c.decodeIfPresent([String: SyllableStat].self, forKey: .syllableStats) ?? [:]
         wordStats = try c.decodeIfPresent([String: WordStat].self, forKey: .wordStats) ?? [:]
         hasCompletedCalibration = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedCalibration) ?? false
+        numberStats = try c.decodeIfPresent([String: NumberStat].self, forKey: .numberStats) ?? [:]
+        currentFocusNumber = try c.decodeIfPresent(String.self, forKey: .currentFocusNumber)
+        if let saved = try c.decodeIfPresent(Set<String>.self, forKey: .introducedNumbers) {
+            introducedNumbers = saved
+        } else {
+            var seed = Set<String>(numberStats.keys)
+            if let focus = currentFocusNumber { seed.insert(focus) }
+            introducedNumbers = seed
+        }
+        everMasteredNumbers = try c.decodeIfPresent(Set<String>.self, forKey: .everMasteredNumbers) ?? []
+        hasCompletedNumberCalibration = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedNumberCalibration) ?? false
+        for (key, stat) in numberStats {
+            if introducedNumbers.contains(key), stat.isFocusGraduated {
+                everMasteredNumbers.insert(key)
+            }
+        }
         currentFocusLetter = try c.decodeIfPresent(String.self, forKey: .currentFocusLetter)
         currentSyllableFocus = try c.decodeIfPresent(String.self, forKey: .currentSyllableFocus)
         currentWordFocus = try c.decodeIfPresent(String.self, forKey: .currentWordFocus)
@@ -887,6 +1068,15 @@ struct Profile: Identifiable, Codable, Equatable {
         } else {
             focusPracticedDays = []
         }
+
+        numberFocusStartedDay = try c.decodeIfPresent(LocalDay.self, forKey: .numberFocusStartedDay)
+        numberFocusPracticedDays = try c.decodeIfPresent(Set<LocalDay>.self, forKey: .numberFocusPracticedDays) ?? []
+        lastNewNumberDay = try c.decodeIfPresent(LocalDay.self, forKey: .lastNewNumberDay)
+        pausedFocusNumbers = try c.decodeIfPresent(Set<String>.self, forKey: .pausedFocusNumbers) ?? []
+        let savedPausedFocusNumberDays = try c.decodeIfPresent([String: LocalDay].self, forKey: .pausedFocusNumberDays)
+        pausedFocusNumberDays = savedPausedFocusNumberDays
+            ?? Dictionary(uniqueKeysWithValues: pausedFocusNumbers.map { ($0, LocalDay.today()) })
+        lastNumberFocusSelection = try c.decodeIfPresent(FocusSelectionReason.self, forKey: .lastNumberFocusSelection)
 
         lastNewLetterDay = try Profile.decodeLocalDay(
             container: c,
@@ -907,6 +1097,23 @@ struct Profile: Identifiable, Codable, Equatable {
             [String: Int].self,
             forKey: .dailyTargetAskCounts
         ) ?? [:]
+        numberDailyPracticeDay = try c.decodeIfPresent(LocalDay.self, forKey: .numberDailyPracticeDay)
+        numberDailyPracticeAttempts = try c.decodeIfPresent(Int.self, forKey: .numberDailyPracticeAttempts) ?? 0
+        numberDailyPracticeWinnerClaimedDay = try c.decodeIfPresent(
+            LocalDay.self,
+            forKey: .numberDailyPracticeWinnerClaimedDay
+        )
+        numberDailyPracticeWinnerClaimedMilestone = try c.decodeIfPresent(
+            Int.self,
+            forKey: .numberDailyPracticeWinnerClaimedMilestone
+        ) ?? 0
+        numberCameoExposureDay = try c.decodeIfPresent(LocalDay.self, forKey: .numberCameoExposureDay)
+        numberCameoExposuresToday = try c.decodeIfPresent(Int.self, forKey: .numberCameoExposuresToday) ?? 0
+        numberDailyTargetAskDay = try c.decodeIfPresent(LocalDay.self, forKey: .numberDailyTargetAskDay)
+        numberDailyTargetAskCounts = try c.decodeIfPresent(
+            [String: Int].self,
+            forKey: .numberDailyTargetAskCounts
+        ) ?? [:]
         learningCycleStartDay = try c.decodeIfPresent(LocalDay.self, forKey: .learningCycleStartDay)
         weeklyIntroducedLetters = try c.decodeIfPresent(Set<String>.self, forKey: .weeklyIntroducedLetters) ?? []
         if let saved = try c.decodeIfPresent(Int.self, forKey: .completedLetterSessionsInCycle) {
@@ -923,6 +1130,24 @@ struct Profile: Identifiable, Codable, Equatable {
         }
         activeWeeklyAssessment = try c.decodeIfPresent(WeeklyLetterAssessment.self, forKey: .activeWeeklyAssessment)
         recentWeeklyAssessments = try c.decodeIfPresent([WeeklyLetterAssessment].self, forKey: .recentWeeklyAssessments) ?? []
+        numberLearningCycleStartDay = try c.decodeIfPresent(LocalDay.self, forKey: .numberLearningCycleStartDay)
+        weeklyIntroducedNumbers = try c.decodeIfPresent(Set<String>.self, forKey: .weeklyIntroducedNumbers) ?? []
+        if let saved = try c.decodeIfPresent(Int.self, forKey: .completedNumberSessionsInCycle) {
+            completedNumberSessionsInCycle = max(0, saved)
+        } else {
+            completedNumberSessionsInCycle = min(
+                6,
+                numberDailyPracticeWinnerClaimedMilestone / 25
+            )
+        }
+        activeWeeklyNumberAssessment = try c.decodeIfPresent(
+            WeeklyNumberAssessment.self,
+            forKey: .activeWeeklyNumberAssessment
+        )
+        recentWeeklyNumberAssessments = try c.decodeIfPresent(
+            [WeeklyNumberAssessment].self,
+            forKey: .recentWeeklyNumberAssessments
+        ) ?? []
         lastSessionDay = try Profile.decodeLocalDay(
             container: c,
             preferred: .lastSessionDay,
@@ -1040,21 +1265,58 @@ struct Profile: Identifiable, Codable, Equatable {
             [Int: GridPerformanceStat].self,
             forKey: .gridPerformanceStats
         ) ?? [:]
+        numberGridPerformanceStats = try c.decodeIfPresent(
+            [Int: GridPerformanceStat].self,
+            forKey: .numberGridPerformanceStats
+        ) ?? [:]
+        lastFrozenNumberOptionsPerRound = try c.decodeIfPresent(
+            Int.self,
+            forKey: .lastFrozenNumberOptionsPerRound
+        )
+
+        if let saved = try c.decodeIfPresent(NumberInstructionalBand.self, forKey: .highestNumberBandEverReached) {
+            highestNumberBandEverReached = saved
+        } else {
+            highestNumberBandEverReached = NumberInstructionalBand.from(
+                introducedCount: introducedNumbers.count,
+                knownCount: numberStats.values.filter(\.effectiveIsKnown).count,
+                strongKnownCount: numberStats.values.filter(\.isStrongKnown).count
+            )
+        }
+
+        if let saved = try c.decodeIfPresent(Set<NumberInstructionalBand>.self, forKey: .celebratedNumberBands) {
+            celebratedNumberBands = saved
+        } else {
+            let highestRank = highestNumberBandEverReached.sortOrder
+            celebratedNumberBands = Set(
+                NumberInstructionalBand.allCases.filter { $0.sortOrder <= highestRank }
+            )
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, avatarId, language, modifiedAt
         case letterStats, syllableStats, wordStats, hasCompletedCalibration
+        case numberStats, introducedNumbers, everMasteredNumbers
+        case currentFocusNumber, hasCompletedNumberCalibration
         case currentFocusLetter, currentSyllableFocus, currentWordFocus
         // Canonical (LocalDay-typed) keys.
         case focusStartedDay, focusPracticedDays
+        case numberFocusStartedDay, numberFocusPracticedDays, lastNewNumberDay
+        case pausedFocusNumbers, pausedFocusNumberDays, lastNumberFocusSelection
         case syllablesUnlockedAt, wordsUnlockedAt
         case lastNewLetterDay, cameoExposureDay, cameoExposuresToday
         case dailyPracticeDay, dailyPracticeAttempts
         case dailyPracticeWinnerClaimedDay, dailyPracticeWinnerClaimedMilestone
         case dailyTargetAskDay, dailyTargetAskCounts
+        case numberDailyPracticeDay, numberDailyPracticeAttempts
+        case numberDailyPracticeWinnerClaimedDay, numberDailyPracticeWinnerClaimedMilestone
+        case numberCameoExposureDay, numberCameoExposuresToday
+        case numberDailyTargetAskDay, numberDailyTargetAskCounts
         case learningCycleStartDay, weeklyIntroducedLetters, completedLetterSessionsInCycle
         case activeWeeklyAssessment, recentWeeklyAssessments
+        case numberLearningCycleStartDay, weeklyIntroducedNumbers, completedNumberSessionsInCycle
+        case activeWeeklyNumberAssessment, recentWeeklyNumberAssessments
         case lastSessionDay
         // Legacy keys, decoded only for soft migration. Never written.
         case focusStartedDate
@@ -1076,6 +1338,8 @@ struct Profile: Identifiable, Codable, Equatable {
         case highestLevelEverReached, celebratedLevels
         case lastFrozenLetterOptionsPerRound
         case gridPerformanceStats
+        case numberGridPerformanceStats, lastFrozenNumberOptionsPerRound
+        case highestNumberBandEverReached, celebratedNumberBands
     }
 
     /// Custom encoder that writes only the canonical fields. The legacy
@@ -1094,11 +1358,22 @@ struct Profile: Identifiable, Codable, Equatable {
         try c.encode(syllableStats, forKey: .syllableStats)
         try c.encode(wordStats, forKey: .wordStats)
         try c.encode(hasCompletedCalibration, forKey: .hasCompletedCalibration)
+        try c.encode(numberStats, forKey: .numberStats)
+        try c.encode(introducedNumbers, forKey: .introducedNumbers)
+        try c.encode(everMasteredNumbers, forKey: .everMasteredNumbers)
+        try c.encodeIfPresent(currentFocusNumber, forKey: .currentFocusNumber)
+        try c.encode(hasCompletedNumberCalibration, forKey: .hasCompletedNumberCalibration)
         try c.encodeIfPresent(currentFocusLetter, forKey: .currentFocusLetter)
         try c.encodeIfPresent(currentSyllableFocus, forKey: .currentSyllableFocus)
         try c.encodeIfPresent(currentWordFocus, forKey: .currentWordFocus)
         try c.encodeIfPresent(focusStartedDay, forKey: .focusStartedDay)
         try c.encode(focusPracticedDays, forKey: .focusPracticedDays)
+        try c.encodeIfPresent(numberFocusStartedDay, forKey: .numberFocusStartedDay)
+        try c.encode(numberFocusPracticedDays, forKey: .numberFocusPracticedDays)
+        try c.encodeIfPresent(lastNewNumberDay, forKey: .lastNewNumberDay)
+        try c.encode(pausedFocusNumbers, forKey: .pausedFocusNumbers)
+        try c.encode(pausedFocusNumberDays, forKey: .pausedFocusNumberDays)
+        try c.encodeIfPresent(lastNumberFocusSelection, forKey: .lastNumberFocusSelection)
         try c.encodeIfPresent(syllablesUnlockedAt, forKey: .syllablesUnlockedAt)
         try c.encodeIfPresent(wordsUnlockedAt, forKey: .wordsUnlockedAt)
         try c.encode(hasCompletedSyllableOnboarding, forKey: .hasCompletedSyllableOnboarding)
@@ -1115,11 +1390,24 @@ struct Profile: Identifiable, Codable, Equatable {
         try c.encode(dailyPracticeWinnerClaimedMilestone, forKey: .dailyPracticeWinnerClaimedMilestone)
         try c.encodeIfPresent(dailyTargetAskDay, forKey: .dailyTargetAskDay)
         try c.encode(dailyTargetAskCounts, forKey: .dailyTargetAskCounts)
+        try c.encodeIfPresent(numberDailyPracticeDay, forKey: .numberDailyPracticeDay)
+        try c.encode(numberDailyPracticeAttempts, forKey: .numberDailyPracticeAttempts)
+        try c.encodeIfPresent(numberDailyPracticeWinnerClaimedDay, forKey: .numberDailyPracticeWinnerClaimedDay)
+        try c.encode(numberDailyPracticeWinnerClaimedMilestone, forKey: .numberDailyPracticeWinnerClaimedMilestone)
+        try c.encodeIfPresent(numberCameoExposureDay, forKey: .numberCameoExposureDay)
+        try c.encode(numberCameoExposuresToday, forKey: .numberCameoExposuresToday)
+        try c.encodeIfPresent(numberDailyTargetAskDay, forKey: .numberDailyTargetAskDay)
+        try c.encode(numberDailyTargetAskCounts, forKey: .numberDailyTargetAskCounts)
         try c.encodeIfPresent(learningCycleStartDay, forKey: .learningCycleStartDay)
         try c.encode(weeklyIntroducedLetters, forKey: .weeklyIntroducedLetters)
         try c.encode(completedLetterSessionsInCycle, forKey: .completedLetterSessionsInCycle)
         try c.encodeIfPresent(activeWeeklyAssessment, forKey: .activeWeeklyAssessment)
         try c.encode(recentWeeklyAssessments, forKey: .recentWeeklyAssessments)
+        try c.encodeIfPresent(numberLearningCycleStartDay, forKey: .numberLearningCycleStartDay)
+        try c.encode(weeklyIntroducedNumbers, forKey: .weeklyIntroducedNumbers)
+        try c.encode(completedNumberSessionsInCycle, forKey: .completedNumberSessionsInCycle)
+        try c.encodeIfPresent(activeWeeklyNumberAssessment, forKey: .activeWeeklyNumberAssessment)
+        try c.encode(recentWeeklyNumberAssessments, forKey: .recentWeeklyNumberAssessments)
         try c.encodeIfPresent(lastSessionDay, forKey: .lastSessionDay)
         try c.encode(dailyStreakCount, forKey: .dailyStreakCount)
         try c.encode(bestDailyStreak, forKey: .bestDailyStreak)
@@ -1139,6 +1427,10 @@ struct Profile: Identifiable, Codable, Equatable {
         try c.encode(celebratedAlphabetLevels, forKey: .celebratedAlphabetLevels)
         try c.encodeIfPresent(lastFrozenLetterOptionsPerRound, forKey: .lastFrozenLetterOptionsPerRound)
         try c.encode(gridPerformanceStats, forKey: .gridPerformanceStats)
+        try c.encode(numberGridPerformanceStats, forKey: .numberGridPerformanceStats)
+        try c.encodeIfPresent(lastFrozenNumberOptionsPerRound, forKey: .lastFrozenNumberOptionsPerRound)
+        try c.encode(highestNumberBandEverReached, forKey: .highestNumberBandEverReached)
+        try c.encode(celebratedNumberBands, forKey: .celebratedNumberBands)
     }
 
     // MARK: - Migration helpers
@@ -1216,6 +1508,17 @@ struct Profile: Identifiable, Codable, Equatable {
         })
     }
 
+    var knownNumbers: Set<String> {
+        Set(numberStats.compactMap { (key, stat) in
+            guard stat.effectiveIsKnown else { return nil }
+            if key == currentFocusNumber && !stat.isFocusGraduated {
+                if case .markedKnown = stat.parentOverride { return key }
+                return nil
+            }
+            return key
+        })
+    }
+
     var knownAlphabetLetterCount: Int {
         knownLetters.intersection(Set(language.letters)).count
     }
@@ -1246,6 +1549,14 @@ struct Profile: Identifiable, Codable, Equatable {
     /// - `.reset` removes a letter from strong-known even if history was solid.
     var strongKnownLetters: Set<String> {
         Set(letterStats.compactMap { key, stat in
+            if case .reset = stat.parentOverride { return nil }
+            guard stat.isStrongKnown else { return nil }
+            return key
+        })
+    }
+
+    var strongKnownNumbers: Set<String> {
+        Set(numberStats.compactMap { key, stat in
             if case .reset = stat.parentOverride { return nil }
             guard stat.isStrongKnown else { return nil }
             return key
@@ -1286,6 +1597,12 @@ struct Profile: Identifiable, Codable, Equatable {
         })
     }
 
+    var currentlyMasteredNumbers: Set<String> {
+        Set(numberStats.compactMap { (key, stat) in
+            stat.isFocusGraduated ? key : nil
+        })
+    }
+
     var knownSyllables: Set<String> {
         Set(syllableStats.compactMap { key, stat in
             if key == currentSyllableFocus && !stat.isFocusGraduated { return nil }
@@ -1321,6 +1638,12 @@ struct Profile: Identifiable, Codable, Equatable {
         })
     }
 
+    var learningNumbers: Set<String> {
+        Set(numberStats.compactMap { (key, stat) in
+            (stat.targetAttempts > 0 && !stat.effectiveIsKnown) ? key : nil
+        })
+    }
+
     /// Letters in the active language alphabet that have never appeared in
     /// any way for this profile. Used by the dashboard's "Not yet seen"
     /// category and any pre-flight checks that want to know "is there
@@ -1328,6 +1651,10 @@ struct Profile: Identifiable, Codable, Equatable {
     var unseenLetters: Set<String> {
         let alphabet = Set(language.letters)
         return alphabet.subtracting(introducedLetters)
+    }
+
+    var unseenNumbers: Set<String> {
+        NumberDifficulty.allNumberSet.subtracting(introducedNumbers)
     }
 
     var unseenSyllables: Set<String> {
@@ -1362,9 +1689,16 @@ struct Profile: Identifiable, Codable, Equatable {
     var snapshot: ProfileLearningSnapshot {
         let known = knownLetters
         let strongKnown = strongKnownLetters
+        let knownNums = knownNumbers
+        let strongKnownNums = strongKnownNumbers
         let instructionalBand = AlphabetLevel.from(
             letterMasteredCount: strongKnown.intersection(everMasteredLetters).count,
             language: language
+        )
+        let numberBand = NumberInstructionalBand.from(
+            introducedCount: introducedNumbers.count,
+            knownCount: knownNums.count,
+            strongKnownCount: strongKnownNums.intersection(everMasteredNumbers).count
         )
         let readingStage = ReadingStage.from(
             syllablesUnlocked: isReadingLayerUnlocked,
@@ -1445,7 +1779,19 @@ struct Profile: Identifiable, Codable, Equatable {
             dueReviewLetters: dueReviews,
             weakReviewLetters: weakReviews,
             auditReviewLetters: auditReviews,
-            totalLettersInLanguage: language.letters.count
+            totalLettersInLanguage: language.letters.count,
+            knownNumbers: knownNums,
+            strongKnownNumbers: strongKnownNums,
+            currentlyMasteredNumbers: currentlyMasteredNumbers,
+            everMasteredNumbers: everMasteredNumbers,
+            learningNumbers: learningNumbers,
+            unseenNumbers: unseenNumbers,
+            recentlySlippedNumbers: Set(numberStats.compactMap { key, stat in
+                (everMasteredNumbers.contains(key) && stat.wasKnownBefore && !stat.isKnown) ? key : nil
+            }),
+            numberInstructionalBand: numberBand,
+            highestNumberBandEver: highestNumberBandEverReached,
+            totalNumbersInCurriculum: NumberDifficulty.allNumbers.count
         )
     }
 
@@ -1485,6 +1831,56 @@ struct Profile: Identifiable, Codable, Equatable {
         }
     }
 
+    /// Known numbers sorted by descending certainty. Parallel of
+    /// `lettersByConfidence` for the numbers layer.
+    var numbersByConfidence: [String] {
+        knownNumbers.sorted { a, b in
+            let sa = numberStats[a]?.certaintyScore ?? 0
+            let sb = numberStats[b]?.certaintyScore ?? 0
+            if sa != sb { return sa > sb }
+            let ca = numberStats[a]?.confidenceScore ?? 0
+            let cb = numberStats[b]?.confidenceScore ?? 0
+            if ca != cb { return ca > cb }
+            // Numeric ordering keeps ties deterministic ("2" < "10").
+            return (Int(a) ?? 0) < (Int(b) ?? 0)
+        }
+    }
+
+    /// Known numbers sorted by descending scheduler review priority.
+    /// Parallel of `lettersByReviewPriority`.
+    var numbersByReviewPriority: [String] {
+        knownNumbers.sorted { a, b in
+            let pa = numberStats[a]?.reviewPriority ?? 0
+            let pb = numberStats[b]?.reviewPriority ?? 0
+            if pa != pb { return pa > pb }
+            let sa = numberStats[a]?.certaintyScore ?? 0
+            let sb = numberStats[b]?.certaintyScore ?? 0
+            if sa != sb { return sa > sb }
+            return (Int(a) ?? 0) < (Int(b) ?? 0)
+        }
+    }
+
+    /// Distinct local-calendar days the current number focus has been practiced.
+    var numberFocusActiveDays: Int { numberFocusPracticedDays.count }
+
+    /// 3 → 0 scaffolding ladder for the current number focus; mirrors
+    /// `focusScaffoldingLevel`.
+    var numberFocusScaffoldingLevel: Int {
+        max(0, 4 - numberFocusActiveDays)
+    }
+
+    /// Number grid size for the next session — parallel of
+    /// `letterOptionsPerRound`, driven by number knowledge and
+    /// `numberGridPerformanceStats` instead of alphabet counts.
+    var numberOptionsPerRound: Int {
+        NumberInstructionalBand.numberOptionsPerRound(
+            knownCount: knownNumbers.count,
+            strongKnownCount: strongKnownNumbers.count,
+            previousValue: lastFrozenNumberOptionsPerRound,
+            gridPerformance: numberGridPerformanceStats
+        )
+    }
+
     /// Distinct local-calendar days the current focus letter has been
     /// practiced. Derived from `focusPracticedDays` so it can never drift out
     /// of sync with the underlying record.
@@ -1498,6 +1894,7 @@ struct Profile: Identifiable, Codable, Equatable {
     }
 
     var letterMasteredCount: Int { everMasteredLetters.count }
+    var numberMasteredCount: Int { everMasteredNumbers.count }
     var syllableMasteredCount: Int { everMasteredSyllables.count }
     var wordMasteredCount: Int { everMasteredWords.count }
 
@@ -1512,6 +1909,7 @@ struct Profile: Identifiable, Codable, Equatable {
 
     var currentFocusTarget: FocusTarget? {
         if let letter = currentFocusLetter { return .letter(letter) }
+        if let number = currentFocusNumber { return .number(number) }
         return nil
     }
 
@@ -1801,6 +2199,145 @@ extension Profile {
         case .parentMarked: return 4
         case .fluent: return 5
         }
+    }
+
+    // MARK: - Numbers-layer weekly assessment
+
+    /// Numbers analog of `buildAdaptiveWeeklyAssessment`. Same
+    /// `WeeklyLetterAssessment` shape (via the `WeeklyNumberAssessment`
+    /// typealias) but sourced entirely from the number curriculum:
+    /// `weeklyIntroducedNumbers` as the cohort, `numberStats` for evidence.
+    func buildAdaptiveWeeklyNumberAssessment(
+        scheduledFor: LocalDay,
+        startedOn: LocalDay,
+        legacyDailyGoal: Int = 50
+    ) -> WeeklyNumberAssessment {
+        let entries = cappedAdaptiveAssessmentPlanEntries(
+            adaptiveNumberAssessmentPlanEntries(),
+            maxQuestions: WeeklyNumberAssessment.adaptiveSessionCeiling
+        )
+        let assessmentRoundTarget = entries.reduce(0) { $0 + $1.plannedAttempts }
+        let extensionBudget = entries.reduce(0) { $0 + $1.maxExtensions }
+        let visibleExtensionBuffer = min(extensionBudget, max(0, assessmentRoundTarget / 10))
+        let naturalGoal = assessmentRoundTarget + visibleExtensionBuffer
+        let dailyGoalTarget = min(
+            WeeklyNumberAssessment.adaptiveSessionCeiling,
+            max(WeeklyNumberAssessment.adaptiveSessionFloor, naturalGoal)
+        )
+        let hardRoundCap = min(
+            WeeklyNumberAssessment.adaptiveSessionCeiling,
+            max(dailyGoalTarget, assessmentRoundTarget)
+        )
+        let results = Dictionary(uniqueKeysWithValues: entries.map { entry in
+            (
+                entry.letter,
+                WeeklyAssessmentLetterResult(
+                    bucket: entry.bucket,
+                    plannedAttempts: entry.plannedAttempts,
+                    maxExtensions: entry.maxExtensions
+                )
+            )
+        })
+
+        if entries.isEmpty {
+            return WeeklyNumberAssessment(
+                scheduledFor: scheduledFor,
+                startedOn: startedOn,
+                cohortLetters: [],
+                strategy: .legacyCohort,
+                dailyGoalTarget: legacyDailyGoal
+            )
+        }
+
+        return WeeklyNumberAssessment(
+            scheduledFor: scheduledFor,
+            startedOn: startedOn,
+            cohortLetters: entries.map(\.letter),
+            strategy: .adaptiveAudit,
+            assessmentRoundTarget: assessmentRoundTarget,
+            dailyGoalTarget: dailyGoalTarget,
+            hardRoundCap: hardRoundCap,
+            results: results
+        )
+    }
+
+    private func adaptiveNumberAssessmentPlanEntries() -> [WeeklyAssessmentPlanEntry] {
+        let weeklyCohort = Set(weeklyIntroducedNumbers.filter { number in
+            guard NumberDifficulty.isEligibleTarget(number) else { return false }
+            if case .reset = numberStats[number]?.parentOverride { return false }
+            return true
+        })
+        let targetIntroduced = introducedNumbers
+            .union(numberStats.compactMap { number, stat in
+                stat.targetAttempts > 0 ? number : nil
+            })
+
+        let candidates = targetIntroduced
+            .union(weeklyCohort)
+            .filter { number in
+                guard NumberDifficulty.isEligibleTarget(number) else { return false }
+                if case .reset = numberStats[number]?.parentOverride { return false }
+                return true
+            }
+
+        let recentlySlipped = Set(numberStats.compactMap { key, stat in
+            (everMasteredNumbers.contains(key) && stat.wasKnownBefore && !stat.isKnown) ? key : nil
+        })
+
+        return candidates.map { number in
+            WeeklyAssessmentPlanEntry(
+                letter: number,
+                bucket: adaptiveNumberAssessmentBucket(
+                    for: number,
+                    weeklyCohort: weeklyCohort,
+                    recentlySlipped: recentlySlipped
+                )
+            )
+        }
+        .sorted(by: adaptiveNumberAssessmentSort)
+    }
+
+    private func adaptiveNumberAssessmentBucket(
+        for number: String,
+        weeklyCohort: Set<String>,
+        recentlySlipped: Set<String>
+    ) -> WeeklyAssessmentBucket {
+        if weeklyCohort.contains(number) {
+            return .cohort
+        }
+        if let stat = numberStats[number],
+           case .markedKnown = stat.parentOverride,
+           !stat.isStrongKnown {
+            return .parentMarked
+        }
+        if recentlySlipped.contains(number) {
+            return .slipped
+        }
+        guard let stat = numberStats[number] else {
+            return .emerging
+        }
+        if stat.isFluentKnown {
+            return .fluent
+        }
+        if stat.isStrongKnown || stat.evidenceStrength == .solid {
+            return .solid
+        }
+        return .emerging
+    }
+
+    private func adaptiveNumberAssessmentSort(
+        _ lhs: WeeklyAssessmentPlanEntry,
+        _ rhs: WeeklyAssessmentPlanEntry
+    ) -> Bool {
+        let leftPriority = adaptiveAssessmentPriority(lhs.bucket)
+        let rightPriority = adaptiveAssessmentPriority(rhs.bucket)
+        if leftPriority != rightPriority { return leftPriority < rightPriority }
+
+        let leftReview = numberStats[lhs.letter]?.reviewPriority ?? 0
+        let rightReview = numberStats[rhs.letter]?.reviewPriority ?? 0
+        if leftReview != rightReview { return leftReview > rightReview }
+
+        return (Int(lhs.letter) ?? 0) < (Int(rhs.letter) ?? 0)
     }
 
 }

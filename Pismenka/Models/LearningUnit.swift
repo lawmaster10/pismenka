@@ -12,10 +12,12 @@ enum UnitKind: String, Codable, CaseIterable, Equatable {
     case letter
     case syllable
     case word
+    case number
 }
 
 enum LearningActivityKind: String, Codable, CaseIterable, Equatable {
     case letterRecognition
+    case numberRecognition
     case syllableCalibration
     case syllableRecognition
     case syllableBlending
@@ -26,6 +28,7 @@ enum LearningActivityKind: String, Codable, CaseIterable, Equatable {
 
 enum LearningLayer: String, Codable, Equatable {
     case letters
+    case numbers
     case syllables
     case words
 }
@@ -40,6 +43,7 @@ enum FocusTarget: Hashable, Codable, Identifiable {
     case letter(String)
     case syllable(String)
     case word(String)
+    case number(String)
 
     var id: String { storageKey }
 
@@ -48,12 +52,13 @@ enum FocusTarget: Hashable, Codable, Identifiable {
         case .letter: return .letter
         case .syllable: return .syllable
         case .word: return .word
+        case .number: return .number
         }
     }
 
     var rawKey: String {
         switch self {
-        case .letter(let key), .syllable(let key), .word(let key):
+        case .letter(let key), .syllable(let key), .word(let key), .number(let key):
             return key
         }
     }
@@ -63,6 +68,7 @@ enum FocusTarget: Hashable, Codable, Identifiable {
         case .letter(let key): return "letter:\(key)"
         case .syllable(let key): return "syllable:\(key)"
         case .word(let key): return "word:\(key)"
+        case .number(let key): return "number:\(key)"
         }
     }
 
@@ -73,7 +79,7 @@ enum FocusTarget: Hashable, Codable, Identifiable {
                 return String(key.dropLast("|lower".count)).lowercased()
             }
             return key
-        case .syllable(let key), .word(let key):
+        case .syllable(let key), .word(let key), .number(let key):
             return key
         }
     }
@@ -83,6 +89,7 @@ enum FocusTarget: Hashable, Codable, Identifiable {
         case .letter: self = .letter(key)
         case .syllable: self = .syllable(key)
         case .word: self = .word(key)
+        case .number: self = .number(key)
         }
     }
 
@@ -93,7 +100,11 @@ enum FocusTarget: Hashable, Codable, Identifiable {
             self = .syllable(String(storageKey.dropFirst("syllable:".count)))
         } else if storageKey.hasPrefix("word:") {
             self = .word(String(storageKey.dropFirst("word:".count)))
+        } else if storageKey.hasPrefix("number:") {
+            self = .number(String(storageKey.dropFirst("number:".count)))
         } else if storageKey.count == 1 || storageKey.hasSuffix("|lower") {
+            // Bare single-character keys are letters only — never treat bare
+            // digits as numbers (use number:5).
             self = .letter(storageKey)
         } else {
             return nil

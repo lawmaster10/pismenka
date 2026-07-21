@@ -14,6 +14,7 @@ import UIKit
 private enum AudioAssetLocation {
     static let root = "Sounds"
     static let letters = "Sounds/Letters"
+    static let numbers = "Sounds/Numbers"
     static let cermakLetters = "Sounds/PersonalizedLetters/Cermak"
     static let blends = "Sounds/Blends"
 
@@ -22,6 +23,10 @@ private enum AudioAssetLocation {
 
         if filename.hasPrefix("cz_blend_") {
             return [blends, root, nil]
+        }
+
+        if isNumberAsset(filename) {
+            return [numbers, root, nil]
         }
 
         if isCzechLetterAsset(filename), usePersonalizedCzechLetters {
@@ -35,11 +40,87 @@ private enum AudioAssetLocation {
         return [root, nil]
     }
 
+    /// Number voice clips: `en_0`…`en_100` / `cz_0`…`cz_100` (matches
+    /// `^(en|cz)_[0-9]{1,3}$` with the value capped at 100).
+    static func isNumberAsset(_ filename: String) -> Bool {
+        for prefix in ["en_", "cz_"] where filename.hasPrefix(prefix) {
+            let digits = filename.dropFirst(prefix.count)
+            guard (1...3).contains(digits.count),
+                  digits.allSatisfy({ $0.isASCII && $0.isWholeNumber }),
+                  let value = Int(digits),
+                  (0...100).contains(value) else {
+                return false
+            }
+            return true
+        }
+        return false
+    }
+
     private static func isCzechLetterAsset(_ filename: String) -> Bool {
         filename.hasPrefix("cz_")
+            && !isNumberAsset(filename)
             && !filename.hasPrefix("cz_syl_")
             && !filename.hasPrefix("cz_blend_")
             && !filename.hasPrefix("cz_word_")
+    }
+}
+
+/// Word forms for the 0…100 number curriculum, used as the TTS fallback when
+/// a bundled number clip is missing. Speech synthesizers read bare digit
+/// strings unreliably (e.g. "26" as "two six"), so the fallback always feeds
+/// the full spoken form. Mirrors `NUMBER_SPOKEN_FORMS` in
+/// `generate_audio_assets.py`.
+enum NumberSpokenForm {
+    private static let englishOnes = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+        "seventeen", "eighteen", "nineteen"
+    ]
+
+    private static let englishTens: [Int: String] = [
+        2: "twenty", 3: "thirty", 4: "forty", 5: "fifty",
+        6: "sixty", 7: "seventy", 8: "eighty", 9: "ninety"
+    ]
+
+    /// Czech counting forms: feminine "jedna"/"dvě" (never "jeden"/"dva"),
+    /// as used when counting aloud with children.
+    private static let czechOnes = [
+        "nula", "jedna", "dvě", "tři", "čtyři", "pět", "šest", "sedm", "osm", "devět",
+        "deset", "jedenáct", "dvanáct", "třináct", "čtrnáct", "patnáct", "šestnáct",
+        "sedmnáct", "osmnáct", "devatenáct"
+    ]
+
+    private static let czechTens: [Int: String] = [
+        2: "dvacet", 3: "třicet", 4: "čtyřicet", 5: "padesát",
+        6: "šedesát", 7: "sedmdesát", 8: "osmdesát", 9: "devadesát"
+    ]
+
+    static func spokenForm(for key: String, language: GameLanguage) -> String? {
+        guard let value = Int(key), (0...100).contains(value) else { return nil }
+        switch language.resolvedLanguage {
+        case .czech:
+            return czech(value)
+        case .english, .system:
+            return english(value)
+        }
+    }
+
+    static func english(_ value: Int) -> String? {
+        guard (0...100).contains(value) else { return nil }
+        if value == 100 { return "one hundred" }
+        if value < 20 { return englishOnes[value] }
+        let tens = englishTens[value / 10]!
+        let ones = value % 10
+        return ones == 0 ? tens : "\(tens)-\(englishOnes[ones])"
+    }
+
+    static func czech(_ value: Int) -> String? {
+        guard (0...100).contains(value) else { return nil }
+        if value == 100 { return "sto" }
+        if value < 20 { return czechOnes[value] }
+        let tens = czechTens[value / 10]!
+        let ones = value % 10
+        return ones == 0 ? tens : "\(tens) \(czechOnes[ones])"
     }
 }
 
@@ -312,6 +393,8 @@ class AudioService: NSObject, ObservableObject, AVAudioPlayerDelegate, AVSpeechS
             preloadSound(filename: "\(language.audioPrefix)_word_\(audioKey(for: word))_slabikované", type: "m4a")
         case (_, .word(let word)):
             preloadSound(filename: "\(language.audioPrefix)_word_\(audioKey(for: word))", type: "m4a")
+        case (_, .number(let number)):
+            preloadSound(filename: "\(language.audioPrefix)_\(number)", type: "m4a")
         }
     }
     
@@ -424,6 +507,41 @@ class AudioService: NSObject, ObservableObject, AVAudioPlayerDelegate, AVSpeechS
         return letter
     }
 
+    // MARK: - Number Audio
+
+    /// Play the number prompt for the given language.
+    /// Format: {lang}_{number}.m4a (e.g., en_26.m4a, cz_26.m4a) resolved from
+    /// Sounds/Numbers. On a missing bundled clip, falls back to TTS with the
+    /// full word form ("twenty-six" / "dvacet šest") — never the digit string.
+    func playNumber(_ key: String, language: GameLanguage) {
+        debugAudioLog("🎵 playNumber called: number=\(key), language=\(language)")
+        let filename = "\(language.audioPrefix)_\(key)"
+        playSound(
+            filename: filename,
+            type: "m4a",
+            isVoice: true,
+            fallbackSpeech: NumberSpokenForm.spokenForm(for: key, language: language),
+            fallbackLanguage: language
+        )
+    }
+
+    /// Soft diagnostic for number voice clips. Deliberately kept out of
+    /// `missingAssetNames` — missing number audio degrades to the spoken-word
+    /// TTS fallback rather than hard-gating launch validation.
+    func missingNumberAssetNames(for languages: [GameLanguage] = [.english, .czech]) -> [String] {
+        var missing: [String] = []
+        for lang in languages {
+            let prefix = lang.audioPrefix
+            for number in NumberDifficulty.allNumbers {
+                let filename = "\(prefix)_\(number)"
+                if resolveURL(filename: filename, type: "m4a") == nil {
+                    missing.append("\(filename).m4a")
+                }
+            }
+        }
+        return missing.sorted()
+    }
+
     // MARK: - Syllable and Word Audio
 
     func playSyllable(_ syllable: String, language: GameLanguage) {
@@ -472,6 +590,8 @@ class AudioService: NSObject, ObservableObject, AVAudioPlayerDelegate, AVSpeechS
             playWordSegmented(word, language: language)
         case (_, .word(let word)):
             playWord(word, language: language)
+        case (_, .number(let number)):
+            playNumber(number, language: language)
         }
     }
 
@@ -785,6 +905,7 @@ extension AudioService: CurriculumAudioAvailability {
  Voice files (m4a):
  - en_a.m4a through en_z.m4a
  - cz_a.m4a through cz_z.m4a
+ - en_0.m4a through en_100.m4a and cz_0.m4a through cz_100.m4a (Sounds/Numbers)
  - sfx_wow_en.m4a (Winner-celebration voice clip, played for every language)
 
  SFX files (mp3):

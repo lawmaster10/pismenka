@@ -133,6 +133,8 @@ class AppSettings: ObservableObject {
         static let reminderMinute = "reminderMinute"
         static let lowercaseMode = "lowercaseMode"
         static let modifiedAt = "settingsModifiedAt"
+        /// Local-only home mode toggle. Intentionally NOT in AppSettingsSnapshot.
+        static let activeLearningLayer = "activeLearningLayer"
     }
 
     private let defaults: UserDefaults
@@ -226,6 +228,19 @@ class AppSettings: ObservableObject {
         }
     }
 
+    /// Home-screen Letters/Numbers toggle. Local-only — not cloud-synced.
+    @Published var activeLearningLayer: LearningLayer {
+        didSet {
+            let allowed: LearningLayer = (activeLearningLayer == .numbers) ? .numbers : .letters
+            if activeLearningLayer != allowed {
+                activeLearningLayer = allowed
+                return
+            }
+            defaults.set(allowed.rawValue, forKey: Keys.activeLearningLayer)
+            // Do not call touch() — this must not bump settingsModifiedAt / cloud sync.
+        }
+    }
+
     @Published private(set) var modifiedAt: Date
     
     init(defaults: UserDefaults = .standard) {
@@ -246,6 +261,9 @@ class AppSettings: ObservableObject {
         self.reminderMinute = defaults.object(forKey: Keys.reminderMinute) as? Int ?? 0
         let lowercaseRaw = defaults.string(forKey: Keys.lowercaseMode) ?? LowercaseMode.uppercaseOnly.rawValue
         self.lowercaseMode = LowercaseMode(rawValue: lowercaseRaw) ?? .uppercaseOnly
+        let layerRaw = defaults.string(forKey: Keys.activeLearningLayer) ?? LearningLayer.letters.rawValue
+        let parsedLayer = LearningLayer(rawValue: layerRaw) ?? .letters
+        self.activeLearningLayer = (parsedLayer == .numbers) ? .numbers : .letters
         self.modifiedAt = defaults.object(forKey: Keys.modifiedAt) as? Date ?? .distantPast
     }
 

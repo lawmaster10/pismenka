@@ -1,12 +1,21 @@
 # Písmenka 🔤
 
-A profile-based **adaptive** pre-reading game for toddlers (ages 3-5). The app figures out which letters your child knows, gives them a visible practice goal, introduces a fresh spotlight letter without destroying longer-term remediation state, explicitly shows and drills that same introduced unit, and runs a retention progress check after every six completed 25-answer letter sessions. The Expert alphabet crown remains the long-term trophy.
+A profile-based **adaptive** pre-reading and early-numeracy game for toddlers (ages 3-5). The app figures out which letters — or, in Numbers mode, which numbers (0–100) — your child knows, gives them a visible practice goal, introduces a fresh spotlight unit without destroying longer-term remediation state, explicitly shows and drills that same introduced unit, and runs a retention progress check after every six completed 25-answer sessions in that layer. The Expert alphabet crown and the Fluent number band remain the long-term trophies.
 
 iOS 17+, SwiftUI.
 
-> **Current release scope.** The shipped app is **100 % letter-based**. The Czech syllable (`slabiky`) and word-reading models, gates, focus state, distractor pools, calibration phases, and `ReadingStage` ladder all still live in the codebase as future-version scaffolding, but they are **silent in the current build** — not scheduled for sessions (`primaryLayer` stays `.letters`), not shown in the UI, never eligible for syllable/word rounds in the planner (`isSyllableLayerEligible` is unused), and not validated as required assets. A `syllablesUnlockedAt` timestamp may still be written on Czech alphabet completion during play, but it is cleared on the next `commitSessionStartIfNeeded` and does not enable reading sessions in this build. The live required audio surface is English/Czech letter prompts, the optional personalized Czech letter pack, and game SFX only; `AudioService.requiredCurriculumVoiceAssets(for:)` returns `[]`, so syllable/blend/word clips are neither required nor bundled in the current `Pismenka/Sounds/` tree (115 audio assets: 67 letter prompts, 41 optional Čermák Czech prompts, 7 SFX/Winner clips). `AudioService` still knows the future reading filenames/paths (`cz_syl_*`, `cz_blend_*`, `cz_word_*`, optional `Sounds/Blends/`), but those recordings are absent from the app bundle today — older copies may still exist in repo backup folders such as `audio_backups/` outside the Xcode target. Session planning in `ProfileManager.previewSessionPlan(...)` uses a local profile copy with `syllablesUnlockedAt`, `wordsUnlockedAt`, `currentSyllableFocus`, and `currentWordFocus` nilled out; `previewSessionPlan` applies that clearing in memory only until `commitSessionStartIfNeeded` runs on the child's first answer in `GameView`, which persists the same clearing; `buildSessionPlan` always leaves `primaryLayer` at its default `.letters` (never schedules syllables/words). Throughout this document, any subsection describing syllable/word behavior — CV bridge, `syllableCalibration` / `syllableRecognition` / `syllableBlending` / `wordReading` / `wordBuilding` phases, `WordCurriculum` audio gates, reading-stage badges, the `readingPracticePaused` toggle, and so on — describes **dormant scaffolding kept healthy for a future release**, not behavior the current build exposes. The README is the short product-scope statement; this document carries the exact repo asset inventory.
+> **Current release scope.** The shipped app covers **letters plus the numbers peer layer**; the reading layers stay dormant. The Czech syllable (`slabiky`) and word-reading models, gates, focus state, distractor pools, calibration phases, and `ReadingStage` ladder all still live in the codebase as future-version scaffolding, but they are **silent in the current build** — never scheduled for sessions, not shown in the UI, never eligible for syllable/word rounds in the planner (`isSyllableLayerEligible` is unused), and not validated as required assets. A `syllablesUnlockedAt` timestamp may still be written on Czech alphabet completion during play, but it is cleared on the next `commitSessionStartIfNeeded` and does not enable reading sessions in this build. Session planning is layer-aware: `ProfileManager.previewSessionPlan(profileId:lowercaseMode:layer:)` / `commitSessionStartIfNeeded(...)` route through `buildSessionPlan(..., layer:, commit:)`, which forwards `layer == .numbers` to `buildNumberSessionPlan` (plans with `primaryLayer = .numbers` / `activityKind = .numberRecognition`). The **letters** branch uses a local profile copy with `syllablesUnlockedAt`, `wordsUnlockedAt`, `currentSyllableFocus`, and `currentWordFocus` nilled out (in memory on preview, persisted on the first-answer commit) and leaves `primaryLayer` at `.letters` — only the dormant **reading** layers are forced off; numbers are a first-class scheduled layer. The hard-required audio surface is English/Czech letter prompts, the optional personalized Czech letter pack, and game SFX (~115 files: 67 letter prompts, 41 optional Čermák Czech prompts, 7 SFX/Winner clips); the Numbers voice pack (202 files under `Sounds/Numbers/`) is bundled on the **soft** validation path with a runtime TTS fallback, bringing the bundled total to ≈ 317 audio files (see [Required assets → Audio](#audio) for the current pack state). `AudioService.requiredCurriculumVoiceAssets(for:)` returns `[]`, so syllable/blend/word clips are neither required nor bundled; `AudioService` still knows the future reading filenames/paths (`cz_syl_*`, `cz_blend_*`, `cz_word_*`, optional `Sounds/Blends/`), but those recordings are absent from the app bundle today — older copies may still exist in repo backup folders such as `audio_backups/` outside the Xcode target. Throughout this document, any subsection describing syllable/word behavior — CV bridge, `syllableCalibration` / `syllableRecognition` / `syllableBlending` / `wordReading` / `wordBuilding` phases, `WordCurriculum` audio gates, reading-stage badges, the `readingPracticePaused` toggle, and so on — describes **dormant scaffolding kept healthy for a future release**, not behavior the current build exposes. The README is the short product-scope statement; this document carries the exact repo asset inventory.
 >
-> **Roadmap (not yet in the codebase).** The next planned learning track is **numbers** (number recognition, counting, early quantity work), which will land *before* the Czech reading layer is re-activated. There is no `NumberCurriculum`, `NumberStat`, or numbers-layer plumbing in the repository yet — the order is intentional: numbers first, reading second. Plan the eventual schema and routing work as a peer of the existing letter/reading layers (its own `UnitKind`, its own `requiredCurriculumVoiceAssets(...)` entries, its own `LearningLayer` case, its own dashboard surfaces, its own reset semantics) so that turning the silent reading scaffolding back on remains a separate later step.
+> **Numbers peer layer (shipped).** The **numbers** learning track (number recognition, 0–100) has landed as a peer layer of letters, ahead of the Czech reading layer being re-activated — the order stays intentional: numbers first, reading second. Numbers ship with their own `UnitKind.number` / `LearningLayer.numbers` cases, their own curriculum and confusion policies (`NumberDifficulty`), their own instructional band (`NumberInstructionalBand`, never derived from `AlphabetLevel`), their own per-unit stats (`NumberStat`, a `typealias` of `LetterStat`), their own calibration flag (`hasCompletedNumberCalibration`), their own daily/weekly twin counters on `Profile`, their own parent dashboard (`ParentNumberDashboardView`), and their own reset semantics inside `resetAllProgress` / the numbers-specific resets. The home screen switches between Letters and Numbers via the **local-only** `AppSettings.activeLearningLayer` (never synced to cloud backup). The day streak is shared across both layers; cycle/session counters are per-layer twins. Number voice clips are validated **softly** (`AudioService.missingNumberAssetNames(...)`) with a TTS spoken-word fallback, unlike the hard letter-asset gate. Re-activating the silent reading scaffolding remains a separate later step.
+
+### Numbers peer — summary
+
+Numbers are documented inline throughout this document as a shipped peer of letters; the load-bearing decisions in brief:
+
+- **`SessionPlan` field reuse.** Numbers reuse `focusLetter`, `dailySpotlightLetter`, `introducedNewFocusLetter`, and `SessionMode.extraPractice(letter:)` with bare digit keys (`"26"`); disambiguation is `primaryLayer == .numbers` plus `focusTarget = .number(...)` / `activityKind = .numberRecognition`. No parallel `focusNumber` twins exist on the plan. See [Daily session](#3-daily-session).
+- **`FocusTarget` bare-digit trap.** `FocusTarget(storageKey:)` treats any bare single character as a **letter** (`"5"` → `.letter("5")`); number paths must always use the `number:` prefix. See [Numbers peer layer](#numbers-peer-layer).
+- **Twin state, shared streak.** Every cycle/goal/focus/assessment field has a number twin on `Profile`; only the day streak (`dailyStreakCount` / `bestDailyStreak` / `lastSessionDay`) is shared. See [Data storage](#data-storage) and [Granular resets](#granular-resets).
+- **Parent surface.** Numbers mode swaps in [`ParentNumberDashboardView`](#numbers-dashboard) and the profile card's Confident n/m counts against the introduced `numberKnowledgePool`, never all 101.
 
 ---
 
@@ -21,11 +30,13 @@ iOS 17+, SwiftUI.
   - [Six-session retention progress check](#six-session-retention-progress-check)
   - [Session end & "Play again"](#4-session-end--play-again)
   - [Parent dashboard](#5-parent-dashboard)
+  - [Numbers dashboard](#numbers-dashboard)
 - [The adaptive learning model](#the-adaptive-learning-model)
   - [Per-letter mastery (`LetterStat`)](#per-letter-mastery-letterstat)
   - [Alphabet levels & reading stages](#alphabet-levels--reading-stages)
   - [Answer-grid sizing: 4 / 6 / 8 options](#answer-grid-sizing-4--6--8-options)
   - [Daily spotlight, durable focus & scaffolding ladder](#daily-spotlight-durable-focus--scaffolding-ladder)
+  - [Numbers peer layer](#numbers-peer-layer)
   - [Czech reading progression](#czech-reading-progression)
   - [Syllable contrast policy](#syllable-contrast-policy)
   - [Distractor selection (`DistractorTier`)](#distractor-selection-distractortier)
@@ -63,8 +74,9 @@ iOS 17+, SwiftUI.
 | Profiles | Up to 4, each fully independent |
 | Languages | English 🇺🇸 and Czech 🇨🇿 (per profile; app-level default from onboarding) |
 | Network | Not needed for gameplay or learning; optional Apple/Google Firebase backup for parents (requires `GoogleService-Info.plist`; see Settings and first-launch onboarding) |
-| Core loop | Hear a letter → pick the matching letter from a playful options grid (slabika/word loops remain dormant scaffolding) |
-| Difficulty | Self-adjusting per child and per letter, with a retention progress check after six completed 25-answer letter sessions |
+| Learning layers | **Letters** and **Numbers (0–100)**, switched from the home screen (`AppSettings.activeLearningLayer`, local-only); reading layers dormant |
+| Core loop | Hear a letter **or** a number → pick the matching symbol from a playful options grid (slabika/word loops remain dormant scaffolding) |
+| Difficulty | Self-adjusting per child and per unit, with a per-layer retention progress check after six completed 25-answer sessions in that layer |
 | Session length | Variable length per sitting (no fixed timer in code), paced by 5 hearts; progress persists toward and beyond a visible goal — **25** correct-answer rounds on introduction sessions (wrong taps do not advance the bar), **8–40 adaptive** rounds on progress-check sessions (hard cap `adaptiveSessionCeiling`; may end sooner once cohort evidence resolves; every answered round counts during the check) |
 | Parent surface | Hold a profile card → iOS context menu → **View results** (parent gate → dashboard) or **Edit profile** (parent gate → edit sheet) |
 
@@ -81,18 +93,22 @@ App launch
    │                    ProfileSelectView
    │
    └──[returning / migrated]──▶ ProfileSelectView
-                                   │
+                                   │  (pinned Letters 🔠 / Numbers 🔢 switch →
+                                   │   AppSettings.activeLearningLayer, local-only)
    ├──[gear + parent gate]──────────────────▶ SettingsView
    │
    ├──[hold profile → iOS context menu]
    │      │
-   │      ├──[View results + parent gate]──▶ ParentDashboardView
+   │      ├──[View results + parent gate]──▶ ParentDashboardView (letters mode)
+   │      │                                  ParentNumberDashboardView (numbers mode)
    │      │                                   │
-   │      │                                   └──[practice letter]──▶ GameView
+   │      │                                   └──[practice letter / number]──▶ GameView
    │      │
    │      └──[Edit profile + parent gate]──▶ EditProfileView
    │
-   └──[tap profile]──▶ (!hasCompletedCalibration) ──▶ CalibrationView
+   └──[tap profile]──▶ (layer calibration flag false) ──▶ CalibrationView
+                       │   letters: hasCompletedCalibration
+                       │   numbers: hasCompletedNumberCalibration
                        │                 (intro → ~10–22 rounds → finale)
                        │                      │
                        │                      ├──[home]──▶ ProfileSelectView
@@ -106,6 +122,8 @@ App launch
                                                           │      │
                                                   GameView ◀┘    └──▶ ProfileSelectView
 ```
+
+`ProfileSelectView` pins a two-segment Letters/Numbers switch above the `+` button. It writes straight to `AppSettings.activeLearningLayer` (persisted in `UserDefaults`, deliberately **excluded** from `AppSettingsSnapshot` so cloud backup never overwrites a device's home mode; only `.letters` / `.numbers` are accepted). Everything downstream of the profile tap is layer-aware: `ContentView` branches calibration on `hasCompletedCalibration` vs `hasCompletedNumberCalibration`, builds the session plan via `previewSessionPlan(..., layer: settings.activeLearningLayer)`, restores per-layer checkpoints, and **View results** opens `ParentDashboardView` or `ParentNumberDashboardView` depending on the active layer. The profile card's Confident n/m headline is also layer-aware (numbers mode uses `parentNumberKnowledgeSummary(pool: numberKnowledgePool)`).
 
 The profile card uses iOS's standard `.contextMenu` so the gesture is discoverable (long-press triggers the system menu; choosing an action plays a light haptic). A small hint line — `Tap a card to play · Hold for parent options.` — appears below the profile grid once at least one profile exists, so parents can find it without a tutorial. Both context menu actions still pass through `ParentGateView` before the dashboard or edit sheet opens.
 
@@ -132,7 +150,7 @@ Tapping **Create** saves the profile and dismisses the sheet; the child is **not
 
 ### 2. Calibration (first run per profile; parent resets can require it again)
 
-[`CalibrationView`](Pismenka/Views/Game/CalibrationView.swift) plays a friendly ~10-22 round calibration drawn from a generalized early-recognition pool. The base 10 letters come from `LetterDifficulty.earlyRecognitionLetters` — `A B C O X M S T D E` — which mirror published preschool letter-recognition rankings (alphabet-song head `A`-`E` plus visually distinctive `O`/`X`/`M`/`S`/`T`). The first letter of the child's typed name is added to the pool when it isn't already in the base 10 (Czech diacritics like `Š` are mapped to their base, `S`, so the diacritic-prerequisite contract isn't violated). When front-loading won't create consecutive duplicates at the start of the schedule (`draft[1]` must differ from the mapped name letter), that name letter is swapped to round 1 so calibration often opens on a personally meaningful prompt.
+Each layer has its own one-time calibration: letters gate on `hasCompletedCalibration`, numbers on `hasCompletedNumberCalibration`, and both run through the same [`CalibrationView`](Pismenka/Views/Game/CalibrationView.swift) with a `layer` parameter. The letters flow plays a friendly ~10-22 round calibration drawn from a generalized early-recognition pool. The base 10 letters come from `LetterDifficulty.earlyRecognitionLetters` — `A B C O X M S T D E` — which mirror published preschool letter-recognition rankings (alphabet-song head `A`-`E` plus visually distinctive `O`/`X`/`M`/`S`/`T`). The first letter of the child's typed name is added to the pool when it isn't already in the base 10 (Czech diacritics like `Š` are mapped to their base, `S`, so the diacritic-prerequisite contract isn't violated). When front-loading won't create consecutive duplicates at the start of the schedule (`draft[1]` must differ from the mapped name letter), that name letter is swapped to round 1 so calibration often opens on a personally meaningful prompt.
 
 - Each pool letter is scheduled to appear exactly twice; with a name-letter addition the schedule grows from 20 to 22 rounds. A soft "no two consecutive same" pass varies the cadence.
 - Each round records a real `targetAttempts` / `targetCorrect` event; nothing is synthetically pre-marked.
@@ -144,15 +162,26 @@ Tapping **Create** saves the profile and dismisses the sheet; the child is **not
 
 A child who nails most calibration letters will exit with several `LetterStat`s at **2/2** (`targetCorrect`/`targetAttempts`) and many of those letters may already count as data-driven known via `LetterStat.isKnown` / `Profile.knownLetters`. A child who misses often exits with mostly weak stats (often **0/2** or **1/2**); the next session skips warm-up when fewer than three letters count as known (`warmupLength = 0`) and assigns longer warm-up as `knownLetters` grows (2 / 3 / 5 rounds at ≥3 / ≥4 / ≥6 known). `nextFocusWithReason` can re-teach 0/2 letters through the `staleWeakness` branch (threshold `targetAttempts >= 2` so calibration evidence counts).
 
+**Numbers calibration twin.** The same `CalibrationView` runs the numbers layer when `AppSettings.activeLearningLayer == .numbers` and `hasCompletedNumberCalibration` is false (a `layer` parameter switches the flow; there is no separate view):
+
+- The pool is `NumberDifficulty.calibrationPool()` — the digits **1…10** — with each number scheduled twice, the same "no two consecutive same" pass, and the same early-stop rules. There is **no name-letter seed**: the numbers flow passes `nil` where letters use the child's name initial.
+- An optional age seed exists but is **unwired**: `NumberDifficulty.calibrationPool(ageNumber:)` can ensure the child's age digit (1…10) appears in the schedule, mirroring the letter name-seed, but `Profile` has no age field yet, so `CalibrationView` calls `calibrationPool()` with no age.
+- Prompts play through `AudioService.playNumber(_:language:)` (bundled clip with spoken-word TTS fallback).
+- Distractor selection filters hard confusables via `NumberDifficulty.isHardConfusable` (digit transposes, 6/9-style lookalikes, containment pairs, shared-tens) — the numbers analog of the letters flow filtering `visuallyConfusingPairs`.
+- Answers are recorded as typed rounds (`target: .number(...)`, `activityKind: .numberRecognition`), so evidence lands in `numberStats` and round events carry `unitKind: .number`.
+- The finale calls `ProfileManager.markNumberCalibrationComplete` (sets `hasCompletedNumberCalibration = true`); leaving early keeps any recorded `NumberStat` data without setting the flag, exactly like the letters contract.
+
 ### 3. Daily session
 
-`ProfileManager.previewSessionPlan(profileId:)` builds a non-mutating session preview when `GameView` opens. `AdaptiveGameState.commitSessionStartIfNeeded(...)` commits that plan on the first real answer, so merely opening the game does not count as practice. `GameView` calls `commitSessionStartIfNeeded` on every letter tap; the engine no-ops after the first answer unless `plan.mode == .adaptiveDaily` and `roundsThisSession == 0`. Extra parent practice (`SessionMode.extraPractice`) never commits session-start profile mutations. The committed session:
+`ProfileManager.previewSessionPlan(profileId:lowercaseMode:layer:)` builds a non-mutating session preview when `GameView` opens, using the home screen's `AppSettings.activeLearningLayer`. `AdaptiveGameState.commitSessionStartIfNeeded(...)` commits that plan on the first real answer, so merely opening the game does not count as practice. `GameView` calls `commitSessionStartIfNeeded` on every tap; the engine no-ops after the first answer unless `plan.mode == .adaptiveDaily` and `roundsThisSession == 0`. Extra parent practice (`SessionMode.extraPractice`) never commits session-start profile mutations. The committed session:
 
-1. Updates the day streak based on the signed delta between today and `lastSessionDay` (in `LocalDay`, not `Date` — see [Day streak](#day-streak-clock-tolerant)).
-2. Always leaves `primaryLayer` at its default `.letters`. The planner deliberately nils out `syllablesUnlockedAt`, `wordsUnlockedAt`, `currentSyllableFocus`, and `currentWordFocus` on every commit so the dormant reading-layer scaffolding cannot accidentally enter the live session.
-3. Resolves the practice contract: ordinary introduction session (`25` correct target rounds) or, after six such completed sessions, a retention progress check with an adaptive frozen target.
-4. Decides whether to introduce a fresh **daily spotlight** letter today. The spotlight is intentionally separate from the durable remediation/focus state, so a new day does not automatically wipe an in-flight `currentFocusLetter`.
-5. Returns a `SessionPlan` with warm-up length, focus fields, daily-goal contract, weekly review letters, optional `dailySpotlightLetter`, and day-streak fields (`dayStreakCount`, `dayStreakIncreased`) used for the "Day N!" banner.
+1. Updates the day streak based on the signed delta between today and `lastSessionDay` (in `LocalDay`, not `Date` — see [Day streak](#day-streak-clock-tolerant)). The streak engine is **shared** across letters and numbers: both planner branches read and write the same `dailyStreakCount` / `lastSessionDay`.
+2. Sets `primaryLayer` per the requested layer. A `layer: .numbers` plan routes to `buildNumberSessionPlan` and carries `primaryLayer = .numbers` / `activityKind = .numberRecognition`; the letters branch leaves `primaryLayer` at `.letters` and deliberately nils out `syllablesUnlockedAt`, `wordsUnlockedAt`, `currentSyllableFocus`, and `currentWordFocus` on every commit so only the dormant reading-layer scaffolding is forced off.
+3. Resolves the practice contract **per layer**: ordinary introduction session (`25` correct target rounds) or, after six such completed sessions in that layer's cycle, a retention progress check with an adaptive frozen target (letters: `resolveDailyPractice` over `completedLetterSessionsInCycle` / `activeWeeklyAssessment`; numbers: `resolveNumberDailyPractice` over `completedNumberSessionsInCycle` / `activeWeeklyNumberAssessment`).
+4. Decides whether to introduce a fresh **daily spotlight** unit today. The spotlight is intentionally separate from the durable remediation/focus state, so a new day does not automatically wipe an in-flight `currentFocusLetter` / `currentFocusNumber`.
+5. Returns a `SessionPlan` with warm-up length, focus fields, daily-goal contract, review-cohort keys, optional `dailySpotlightLetter`, and day-streak fields (`dayStreakCount`, `dayStreakIncreased`) used for the "Day N!" banner. Numbers plans **reuse the letter-named plan fields with bare digit keys** (`focusLetter = "26"`, `dailySpotlightLetter`, `weeklyReviewLetters`, `SessionMode.extraPractice(letter:)`); `primaryLayer == .numbers` plus the typed `focusTarget = .number(...)` disambiguate — there are no parallel `focusNumber` plan fields.
+
+**Numbers planning specifics** (`buildNumberSessionPlan` / `resolveNumberDailyPractice`): the spotlight picker is `NumberDifficulty.nextFocusCandidate(introduced:known:blocked:)`, which walks the pedagogical `introductionOrder` (1…10, then 0, then teens, then decade anchor + fill per decade, then 100), gated by `isReadyToIntroduce` readiness rules and by requiring a 4-option grid to be buildable under `.avoid`. Introduction updates the number twin fields (`introducedNumbers`, `lastNewNumberDay`, `weeklyIntroducedNumbers`, `currentFocusNumber` / `numberFocusStartedDay` / `numberFocusPracticedDays`, `lastNumberFocusSelection`). Stuck-focus pause has a numbers twin too (`shouldPauseStuckNumberFocus`, `pausedFocusNumbers` / `pausedFocusNumberDays`, 8 practiced days at &lt; 50% recent accuracy). Warm-up length uses the same known-count ladder as letters over `knownNumbers`, additionally capped by how many known numbers are actually review-due (`min(baseWarmup, max(1, dueWarmupCount))`). On review-test days the plan carries no focus number.
 
 **Same-day re-entry.** Toddlers often tap "Play again" multiple times. `recordAnswer` keeps accruing attempts and can graduate focus mid-day, but `commitSessionStartIfNeeded` will not introduce a second daily spotlight (`lastNewLetterDay`), will not bump the day streak again (`delta == 0`), and treats `focusPracticedDays` idempotently. Hearts, stamps, and `roundsThisSession` are **session-local** — each `GameView` gets a fresh `AdaptiveGameState`. See the multi-session table in `ProfileManager.buildSessionPlan` comments.
 
@@ -160,19 +189,21 @@ A session is structured into phases by [`AdaptiveGameState`](Pismenka/Models/Gam
 
 | Phase | Trigger | Round shape |
 |---|---|---|
-| `warmup` | Letter sessions only, when the engine starts in warm-up | Target chosen from known letters ordered by review priority; distractors are other known letters. Warm-up deliberately excludes the active focus/spotlight, so a just-introduced letter is not hidden among warm-up distractors before drill begins. Warm-up uses `ConfusionPolicy.avoid`. Reading-layer routing is dormant in this release (`primaryLayer` stays `.letters`), so only letter sessions use a non-zero planner warm-up. |
+| `warmup` | Letter and number sessions, when the engine starts in warm-up | Target chosen from known units ordered by review priority; distractors are other known units. Warm-up deliberately excludes the active focus/spotlight, so a just-introduced unit is not hidden among warm-up distractors before drill begins. Warm-up uses the `avoid` confusion policy in both layers. Reading-layer routing is dormant in this release, so the dormant syllable/word branches never plan a warm-up. |
 | `drill` | Letter sessions after warm-up, while either a durable focus or daily spotlight is active | The active drill focus is the priority target (by teaching-mode probability, with progressive scaffolding, never chained, capped at 10 asks per local day); remaining rounds go to the needs-work / confusion-partner / strong mix described in [Introduction-day round mix](#daily-goal-winner-button-and-progress-strip). The focus/spotlight also slips in as a "clearly wrong" distractor for extra exposure. Durable remediation focus wins when the child is stuck; otherwise the daily spotlight becomes the active drill focus without clearing `currentFocusLetter`. Product goal for a completed 25-round introduction session: the introduced spotlight appears at least three times and is asked as a target at least once (`testIntroducedSpotlightAppearsDuringDailyLetterSession`); drill forcing (`firstFocusAppearanceDeadline`, `activeDrillFocus`) is designed toward that exposure. |
 | `plainReview` | Letter sessions when no drill focus is active, including no-focus review and retention progress checks | Normal review pulls from known letters, weak/stale letters, and confidence-ordered pools. Progress checks first prioritize the frozen assessment cohort until every cohort letter has enough independent evidence, then fall back to weak/stale/global review. The frozen `instructionalBand` gates similar-shape, mixed-case, and visual-only distractors while cameo eligibility follows its own conservative rules. Progress checks use safer confusable rules than later Expert maintenance and do not inject contrast rounds. |
 | `maintenance` | Alphabet Expert, no current letter focus | Mixed letter review ordered by `reviewPriority`, with deliberate confusable-pair, mixed-case practice, and eligible cameo letters. Reading stage does not decide letter maintenance by itself. |
 | `contrast` | ~1 in 5 eligible review/maintenance round builds (`Int.random(in: 1...5) == 1` per build, not a global quota) | Target is a letter the child often confuses, with the confused letter deliberately shown as a distractor. |
-| `rescue` | After a wrong answer on a letter target | Two-tier queue: wrong non-rescue target → easy retry after **one** intervening round (`dueAfterRounds: 1`); failed easy rescue → mid retry in **2–3** rounds (`midRescueDelayRange`). Rescue is a round override, not a lasting `phase` value. |
+| `rescue` | After a wrong answer on a letter or number target | Two-tier queue: wrong non-rescue target → easy retry after **one** intervening round (`dueAfterRounds: 1`); failed easy rescue → mid retry in **2–3** rounds (`midRescueDelayRange`). Rescue is a round override, not a lasting `phase` value. Number rescues force a 4-option grid, `.avoid` distractors, and (easy tier) a known-numbers pool. |
 | `syllableCalibration` *(dormant)* | First Czech reading session after reading unlock. In the current code, that dormant unlock path is tied to full alphabet completion, not an early CV bridge. | 12 short-CV recognition rounds with same-vowel consonant contrasts; no long-vowel pairs yet. **Not reachable in the current release** — reading unlock fields are forced to nil at session start. |
 | `syllableRecognition` *(dormant)* | Czech profile while the syllable layer is active | Target is the active syllable focus when one exists, otherwise a known/playable CV slabika such as `MA`; options are structurally selected eligible slabiky. |
 | `syllableBlending` / `syllableSegmenting` *(dormant)* | Scheduled reading-production activities | Blending adds `M + A -> MA` style segment metadata; segmenting uses word/syllable segment metadata when routed. |
 | `wordReading` *(dormant)* | Czech word layer after enough known slabiky | Target is a seeded word such as `MÁMA`; options are eligible words with matching syllable shape where possible. |
 | `wordBuilding` *(dormant)* | Scheduled word-production activity | Uses two-syllable tiles and `expectedSequence` / `selectedSequence` in `LearningRound` when invoked. |
 
-Letter sessions use a session-frozen 4/6/8 answer grid from `Profile.letterOptionsPerRound`, based on known/strong-known pool safety **plus** demonstrated independent performance at the current grid size (`Profile.gridPerformanceStats`), not on the alphabet-level badge. Per-round, `AdaptiveGameState.resolvedLetterOptionCount` can still cap a weak, new, slipped, or active-drill-focus target at 4 (or 6 for strong-but-not-fluent) even after a wider session grid is earned. See [Answer-grid sizing: 4 / 6 / 8 options](#answer-grid-sizing-4--6--8-options) for the exact contract. `instructionalBand` still gates the harder distractor/case behavior, but it no longer directly decides the answer count. `LiveDifficulty` can downshift the frozen grid during struggle. Early slabika and word sessions are designed to stay at 4 choices even when the child is already Expert in letters, but they are not reachable in the current release.
+**Numbers sessions share this engine skeleton.** When `plan.primaryLayer == .numbers`, the same `warmup` / `drill` / `plainReview` / `rescue` phases run, but rounds are built by `AdaptiveGameState.buildNumberRound(...)`: targets come from the introduced number pool (warm-up by `numbersByReviewPriority`, drill by the active spotlight/focus with the same focus-chance, hello-focus deadline, and per-day ask-cap machinery, review-test days by `chooseWeeklyNumberAssessmentTarget`), distractors come from `NumberDifficulty.pickDistractors` under the frozen `NumberInstructionalBand`'s confusion policy (relaxed tier by tier before ever shrinking the grid), and the typed round carries `target: .number(...)` / `activityKind: .numberRecognition` so `recordAnswer` writes `numberStats` and `RoundEvent.unitKind == .number`. The letter-only `maintenance` and `contrast` phases and cameo letters have no numbers equivalents today.
+
+Letter sessions use a session-frozen 4/6/8 answer grid from `Profile.letterOptionsPerRound`, based on known/strong-known pool safety **plus** demonstrated independent performance at the current grid size (`Profile.gridPerformanceStats`), not on the alphabet-level badge. Per-round, `AdaptiveGameState.resolvedLetterOptionCount` can still cap a weak, new, slipped, or active-drill-focus target at 4 (or 6 for strong-but-not-fluent) even after a wider session grid is earned. Numbers sessions freeze their own grid from `Profile.numberOptionsPerRound` (backed by `NumberInstructionalBand.numberOptionsPerRound` with `numberGridPerformanceStats` promotion evidence and `lastFrozenNumberOptionsPerRound` hysteresis) and clamp per-round via the twin `resolvedNumberOptionCount`. See [Answer-grid sizing: 4 / 6 / 8 options](#answer-grid-sizing-4--6--8-options) for the exact contract. `instructionalBand` / `numberBand` still gate the harder distractor behavior, but they do not directly decide the answer count. `LiveDifficulty` can downshift the frozen grid during struggle in both layers. Early slabika and word sessions are designed to stay at 4 choices even when the child is already Expert in letters, but they are not reachable in the current release.
 
 #### Daily goal, Winner button, and progress strip
 
@@ -193,23 +224,25 @@ where `progress` is `roundsCorrect` when `dailyPracticeKind == .introduction`, a
 
 On ordinary introduction sessions, only **correct** answers advance the visible bar — a wrong tap earns no progress toward the Winner button. `roundsThisSession` still counts every answered round for warm-up length, focus-appearance deadlines, and round indexing. During a **retention progress check** (`.reviewTest`), the bar uses `roundsThisSession` instead: every answered round counts whether right or wrong, because completion is about *coverage*, not a correct-answer quota.
 
-`dailyGoalStartCount` comes from `Profile.dailyPracticeCount(on:)`, so a child can get 10 correct in the morning, run out of hearts, come back later, and see `10 / 25` already filled. Hearts end the **current sitting** only; they do not reset or fail the daily goal.
+`dailyGoalStartCount` comes from `Profile.dailyPracticeCount(on:)` in the letters layer and `Profile.numberDailyPracticeCount(on:)` in the numbers layer, so a child can get 10 correct in the morning, run out of hearts, come back later, and see `10 / 25` already filled — per layer. Hearts end the **current sitting** only; they do not reset or fail the daily goal.
 
 **Introduction-day round mix.** Within the 25-answer day, `chooseIntroductionDrillTarget` fills non-warm-up rounds in this priority order: (1) the spotlight/focus by teaching-mode probability, never chained back-to-back when alternatives exist; (2) an active confusion partner of the previous target (~35% when a pair like B/D has live mistake evidence), so discriminations get adjacent-round practice; (3) a **needs-work** letter — introduced letters that are weak on recent accuracy, under-practiced (< 5 target attempts), **review-due per the memory scheduler** (`LetterMemoryState`), or still short of strong evidence (never cleared `isStrongKnown` / graduation / lifetime mastery — the parent letter map's "Maybe" tiles), weighted-sampled by a blend of weakness, low attempts, and forgetting risk so the day interleaves the pool instead of drilling the top two; (4) an occasional **strong** letter (~15% base, ~22% when live session accuracy is under 70%, ~30% under 55%), ordered by scheduler `reviewPriority` so the easy win lands on the strong letter closest to slipping. Every letter is hard-capped at **10 target asks per local day** (`hardMaxTargetsPerLetterPerSession`, seeded across sittings from `Profile.dailyTargetAskCounts`), with a sparse-profile escape when nothing else is eligible.
 
-After the first target is reached, the counter keeps going instead of stopping at `25 / 25` or the frozen review/test target. The visible count switches to extra rounds: `+1`, `+5`, `+25`, and so on. Tapping the Winner button records the highest completed milestone for that local day in `dailyPracticeWinnerClaimedMilestone`. On the next same-day session, Winner stays hidden until the child completes another full goal chunk: after claiming `25`, the next Winner appears at `+25` (`50` total); after claiming an adaptive review/test goal, the next Winner appears after one more full goal chunk.
+After the first target is reached, the counter keeps going instead of stopping at `25 / 25` or the frozen review/test target. The visible count switches to extra rounds: `+1`, `+5`, `+25`, and so on. Tapping the Winner button records the highest completed milestone for that local day in `dailyPracticeWinnerClaimedMilestone` (numbers: `numberDailyPracticeWinnerClaimedMilestone`). On the next same-day session, Winner stays hidden until the child completes another full goal chunk: after claiming `25`, the next Winner appears at `+25` (`50` total); after claiming an adaptive review/test goal, the next Winner appears after one more full goal chunk.
+
+The claim itself is layer-scoped: `GameView` calls `ProfileManager.claimDailyPracticeWinner(profileId:milestone:layer: plan.primaryLayer)`. A `.letters` claim moves only `dailyPracticeWinnerClaimed*` / `completedLetterSessionsInCycle` (and can finalize `activeWeeklyAssessment`); a `.numbers` claim moves only `numberDailyPracticeWinnerClaimed*` / `completedNumberSessionsInCycle` (and can finalize `activeWeeklyNumberAssessment`). The two cycles never cross-contaminate.
 
 When the visible goal is reached, adaptive play swaps the progress strip for the `🏆 WINNER 🏆` bar (`Tap for your prize`) until the child claims the milestone; after a claim, the strip returns while extra-round chunks accumulate toward the next Winner. Claiming each ordinary 25-answer chunk increments the persisted six-session cycle. The Winner tap is intentionally a larger celebration than ordinary correct-answer feedback: full-screen celebration confetti (`.celebration`), a big `WOW!`, then applause via `AudioService.playWinnerCelebration` before handing off to `SessionEndView`. During a progress check, claiming Winner at the frozen goal also finalizes the assessment if needed.
 
 The `GameView` card header and bottom progress strip show the contract visually and numerically:
 
-- Card header eyebrow/title: `TODAY / Daily letters` on introduction sessions, `REVIEW / Progress check` during retention assessment (parent-directed letter practice uses `Practice / Practicing <letter>` instead).
+- Card header eyebrow/title: `TODAY / Daily letters` on introduction sessions, `REVIEW / Progress check` during retention assessment (parent-directed practice uses `Practice / Practicing <unit>` instead). The title string is currently `Daily letters` in numbers sessions too — a known cosmetic leftover, not a routing signal.
 - Progress strip count: `5 / 25`, `10 / 25`, `25 / 25`, then `+1`, `+5`, `+25`, using monospaced digits via `dailyGoalDisplayText`.
 - Progress strip right label: `Winner soon` until the daily goal is reached, then `Goal reached` while extra-round chunks continue.
 - Line: a linear `GradientProgressBar`; before the first Winner it fills toward the first goal, and after a Winner claim it refills toward the next full extra chunk.
 - Before each claimable milestone, the progress strip is visible; when a milestone is ready, it is replaced by the Winner bar until tapped.
 
-Only **correct** adaptive-daily **target** rounds advance `Profile.dailyPracticeAttempts` on ordinary days. This is explicit at the persistence boundary via `countsTowardDailyPractice` combined with the round's `wasCorrect` (and the weekly-test exception below):
+Only **correct** adaptive-daily **target** rounds advance `Profile.dailyPracticeAttempts` on ordinary days; number rounds advance the twin `numberDailyPracticeAttempts` under identical rules, with `activeWeeklyNumberAssessment` as the numbers review-day detector. This is explicit at the persistence boundary via `countsTowardDailyPractice` combined with the round's `wasCorrect` (and the weekly-test exception below):
 
 - Counts: correct ordinary target rounds, correct rescue/assisted target rounds, and correct revealed target rounds, when they came from the adaptive daily game flow.
 - Progress-check exception: on review/test days (detected by a present `activeWeeklyAssessment`, committed before the first answer), **every** answered target round counts — wrong answers included — because the check is a coverage audit with an adaptive 8–40 participation target (and may end early once every planned letter has a non-pending outcome), not a correct-answer quota.
@@ -222,23 +255,23 @@ This deliberately separates three ideas that used to be too easy to conflate: **
 
 #### Six-session retention progress check
 
-The longer retention check follows completed practice, not the calendar:
+The longer retention check follows completed practice, not the calendar, and runs **independently per layer**:
 
 ```
-Sessions 1–6: complete the 25-correct letter goal
-Next session: adaptive retention progress check
-After check: reset the counter and begin the next six-session cycle
+Sessions 1–6: complete the 25-correct goal in that layer
+Next session in that layer: adaptive retention progress check
+After check: reset that layer's counter and begin the next six-session cycle
 ```
 
-Scheduling is handled in `ProfileManager.resolveDailyPractice(...)`:
+Scheduling is handled in `ProfileManager.resolveDailyPractice(...)` for letters and its twin `resolveNumberDailyPractice(...)` for numbers (same shape, backed entirely by the number twin fields — `completedNumberSessionsInCycle`, `numberLearningCycleStartDay`, `activeWeeklyNumberAssessment`, `recentWeeklyNumberAssessments`, `weeklyIntroducedNumbers`, and the `numberDailyPractice*` counters; the number cohort is built by `Profile.buildAdaptiveWeeklyNumberAssessment` and stored as `WeeklyNumberAssessment`, a `typealias` of `WeeklyLetterAssessment` keyed by number strings). For letters:
 
 - Each claimed 25-answer Winner milestone increments `completedLetterSessionsInCycle`. Same-day replay sessions count independently when they complete the next 25-answer chunk.
 - At six completed sessions, the next playable session becomes `.reviewTest`, regardless of weekday or elapsed calendar time.
 - The visible `dailyGoalTarget` is frozen from the adaptive audit plan (normally 8–40). `adaptiveSessionFloor` is 8 and `adaptiveSessionCeiling` is 40: when full coverage would exceed 40, lower-priority audit entries are omitted. The check ends as soon as every planned audit letter has a non-pending outcome, or after the independent-evidence cap is reached **only once every planned letter has at least one independent attempt**.
 - If no eligible audit letters exist yet, planning safely remains `.introduction` while preserving the six-session count; the next session retries assessment planning.
-- A due progress check always runs in the letter layer because the reading layer is dormant in this release.
+- The check runs in whichever layer is due: a letters check after six claimed letter sessions, a numbers check after six claimed number sessions. The dormant reading layers never schedule one.
 
-The state lives on `Profile`:
+The letters-layer state lives on `Profile` (each field has a numbers twin, listed in [Data storage](#data-storage)):
 
 | Field | Purpose |
 |---|---|
@@ -282,7 +315,7 @@ Parents can also skip an unfinished progress check from the parent dashboard's e
 
 Daily spotlight candidate selection also skips letters visually confusable with the current cycle's cohort unless the related letter is already strongly known. For example, if `B` was introduced during this cycle and still lacks strong evidence, candidates like `D`, `P`, and `Q` are skipped for the rest of the cycle. This keeps variety without stacking visually similar new symbols too early.
 
-The six-session progress check is letter-specific. Reading-layer sessions are dormant, so the 25-round / adaptive-check contract is the only practice contract the shipped app exposes.
+The six-session progress check exists per layer: letters and numbers each keep their own cycle and assessment history. When a number check finalizes, memory-scheduler follow-ups are stamped on the missed numbers (`needsReview` → next day, `watch` → 3 days) before the snapshot is archived to `recentWeeklyNumberAssessments`. There is no parent skip action for an unfinished **number** check today — `skipActiveWeeklyAssessment` operates on the letters assessment only, so the in-game long-press skip is effectively a no-op during a numbers check (it returns `false` when no letters assessment is active), and `ParentNumberDashboardView` exposes no skip action. Reading-layer sessions are dormant, so the 25-round / adaptive-check contract is the only practice contract the shipped app exposes.
 
 #### Warm-up length adapts to sparse data
 
@@ -293,7 +326,7 @@ knownLetters.count (doc alias: warmupPoolCount) ≥ 6  →  planner returns 5-ro
                                                 < 3  →  planner returns no warm-up
 ```
 
-`warmupPoolCount` is `knownLetters.count` because only letter sessions have an executable warm-up phase. The dormant syllable/word phases return `warmupLength = 0` in their planner branches and would start directly in `syllableRecognition`, `syllableCalibration`, or `wordReading` if they were ever reached.
+`warmupPoolCount` is `knownLetters.count` in the letters branch. The numbers branch runs the same ladder over `knownNumbers.count`, then additionally caps the result by how many known numbers are review-due right now (`min(baseWarmup, max(1, dueWarmupCount))`), so a numbers warm-up never pads with material the scheduler considers fresh. The dormant syllable/word phases return `warmupLength = 0` in their planner branches and would start directly in `syllableRecognition`, `syllableCalibration`, or `wordReading` if they were ever reached.
 
 A `SessionPlan` must be exactly executable by `AdaptiveGameState`: the planner does not promise a 2-round warm-up with only 2 known letters, and the dormant reading branches do not promise warm-ups the engine would skip.
 
@@ -314,13 +347,13 @@ There is no "you lost" UX. Day-streak copy stays positive ("Day N in a row", opt
 
 Actions (left → right): **house** → `ProfileSelectView`; **arrow.counterclockwise** (Play again) → same-day re-entry via `ProfileManager.previewSessionPlan` in `startGame`. `commitSessionStartIfNeeded` still runs only after the first answer (`GameView`), keeping streak and `focusActiveDays` idempotent on replays (see [Multi-session same-day contract](#multi-session-same-day-contract)). `ProfileManager.endSession` on exit mainly persists `bestSessionStreak` from the summary; day-streak and focus-day commits already happened at first answer.
 
-**Checkpoint resume (orthogonal to this screen).** `SessionCheckpointStore` plus `ContentView.restoreCheckpointIfPossible` / profile selection can resume mid-calibration or mid-game from a saved plan and snapshot without passing `SessionEndView`. `GameView` checkpoints on appear, after answers, and on background/inactive; checkpoints clear on normal exit, home, session end, and many parent resets.
+**Checkpoint resume (orthogonal to this screen).** `SessionCheckpointStore` plus `ContentView.restoreCheckpointIfPossible` / profile selection can resume mid-calibration or mid-game from a saved plan and snapshot without passing `SessionEndView`. Checkpoints are stored in **one slot per learning layer** (letters / numbers), and restore reads the slot for the current `AppSettings.activeLearningLayer` — switching the home-screen layer never discards the other layer's in-flight session, and a restored numbers checkpoint additionally re-checks `hasCompletedNumberCalibration` (letters: `hasCompletedCalibration`) before resuming. `GameView` checkpoints on appear, after answers, and on background/inactive, always into its plan's layer slot; checkpoints clear per layer on normal exit, home, session end, and many parent resets.
 
 Note: `.homeTapped` exists on `SessionEndReason` for summaries/tests, but the in-game Home button does not navigate to this screen today.
 
 ### 5. Parent dashboard
 
-Holding a profile card → context menu → **View results** (or **Edit profile** for the edit sheet) → parent gate → [`ParentDashboardView`](Pismenka/Views/Parent/ParentDashboardView.swift) or [`EditProfileView`](Pismenka/Views/Profile/EditProfileView.swift). The dashboard re-reads `@Published` profiles on each render, so it updates live as rounds are recorded. The dashboard is deliberately built around two parent use cases — the **15-second glance** between sessions and the **5-minute audit** every week or two — and the layout is organized into three tiers so that both work without scrolling past content meant for the other:
+Holding a profile card → context menu → **View results** (or **Edit profile** for the edit sheet) → parent gate → [`ParentDashboardView`](Pismenka/Views/Parent/ParentDashboardView.swift) or [`EditProfileView`](Pismenka/Views/Profile/EditProfileView.swift). When the home screen is in Numbers mode (`AppSettings.activeLearningLayer == .numbers`), **View results** opens the sibling [`ParentNumberDashboardView`](Pismenka/Views/Parent/ParentNumberDashboardView.swift) instead — see [Numbers dashboard](#numbers-dashboard) below; the rest of this section describes the letters dashboard. The dashboard re-reads `@Published` profiles on each render, so it updates live as rounds are recorded. The dashboard is deliberately built around two parent use cases — the **15-second glance** between sessions and the **5-minute audit** every week or two — and the layout is organized into three tiers so that both work without scrolling past content meant for the other:
 
 ```
 Tier 1 — 15-second read       Tier 2 — 1-2 minute audit       Tier 3 — 5-minute deep dive
@@ -386,6 +419,18 @@ The toolbar's `ellipsis.circle` button opens a confirmation dialog with profile-
 
 The glossary is the single source of truth for parent-facing taxonomy and is reused everywhere a label appears. It documents both the four headline buckets (`Confidently known`, `Likely known`, `Needs practice`, `Not introduced`) and the per-letter knowledge states (`Needs help`, `Getting there`, `Recently slipped`, `Practicing now`, `Confident`, `Mastered`, plus the two override states). The header's inline `info.circle` and the ellipsis menu's `What do labels mean?` both open the same alert text, so a parent never has to guess how the summary tiles relate to the per-letter rows.
 
+#### Numbers dashboard
+
+[`ParentNumberDashboardView`](Pismenka/Views/Parent/ParentNumberDashboardView.swift) is a deliberately focused sibling of the letters dashboard, opened by **View results** while the home screen is in Numbers mode. Its sections, top to bottom:
+
+- **Header card** — avatar, a `NUMBERS` eyebrow, headline `<confident> of <total> confident`, a chip with the current `NumberInstructionalBand.displayName` (Beginner / Developing / Strong / Fluent), and a `Focus <n>` chip when `currentFocusNumber` is set.
+- **Number knowledge (`bucketsCard`)** — Confident / Likely / Practice / Not-yet tiles from `parentNumberKnowledgeSummary(pool:)`. The pool is `ProfileLearningSnapshot.numberKnowledgePool` — the **introduced/practiced** numbers plus anything with learning evidence, deliberately **not** all 101 numbers of the 0–100 curriculum — and a caption says so explicitly. The same summary over the same pool drives the profile card's Confident n/m headline in Numbers mode.
+- **Number map (`numberMapCard`)** — a traffic-light grid over the pool in pedagogical introduction order; tapping a tile opens per-number actions (**Extra practice for {n}** → `startPracticeSession(profileId:number:)`, **Reset {n} (re-teach)** → `resetNumberStats`).
+- **Recent number rounds** — the last 30 `RoundEvent`s **filtered by `unitKind == .number`**, so letter rounds never leak into the numbers history. (The letters dashboard's **Raw round history** is not kind-filtered today, so on a mixed-play profile it can include number rounds; its weekly-assessment list filters by intent.)
+- **Common confusions** — top pairs from `numberStats[*].confusedWith` at ≥ 2 mix-ups.
+
+The toolbar ellipsis exposes **Undo last reset** (shared `lastResetSnapshot`), **Re-run numbers calibration** (`resetNumberCalibrationOnly`), and **Pick a new focus number** (`resetCurrentNumberFocus`, shown while a focus number is active). Every reset confirmation also clears the numbers-layer session checkpoint. There is no numbers equivalent of the letters dashboard's diagnostics tier, per-number overrides/notes, or progress-check skip today.
+
 ---
 
 ## The adaptive learning model
@@ -417,7 +462,7 @@ Four named evidence tiers:
 - **`isFluentKnown`** — strong-known plus at least 4 timing samples with a fast median response. The single place response time matters: it earns a *positive* upgrade for the hardest roles (confusable-pair proof, mixed-case/visual-only traps, safest easy distractors). Slow medians never demote a letter out of `isStrongKnown` — they just fail to promote it to `isFluentKnown`. See [Asymmetric speed rule](#asymmetric-speed-rule).
 - **`isFocusGraduated`** — ≥ 7/8 of the last 8 target attempts (minimum 8). Stricter; only the current focus needs to clear this bar to graduate and add itself to `everMasteredLetters`.
 
-`UnitProgressStat` uses the same 80% of last-5 shape with a 3-attempt minimum for syllables and words.
+`UnitProgressStat` uses the same 80% of last-5 shape with a 3-attempt minimum for syllables and words. Numbers do not use `UnitProgressStat` at all: `NumberStat` is a `typealias` of `LetterStat`, so every field and evidence tier in this section applies verbatim to `Profile.numberStats` (keyed by `"0"`…`"100"`), including the memory scheduler and confusion evidence.
 
 The tiers intentionally don't overlap awkwardly: a focus letter that crosses `isKnown` (≥ 4/5) but not yet `isFocusGraduated` is **excluded** from `Profile.knownLetters` until graduation, so level math stays clean. A 2/2 calibration letter is emerging-known enough for warm-up and gentle distractors, but it is not fluent-known enough for B/D-style confusable pairs, mixed-case traps, or visual-only distractors.
 
@@ -464,17 +509,17 @@ parentReset   (LetterOverride.reset       — "Reset by parent")
 
 ### Alphabet levels & reading stages
 
-[`AlphabetLevel`](Pismenka/Models/SkillLevel.swift) and `ReadingStage` are separate tracks in the codebase. Only the alphabet track is active in the current release; `ReadingStage` exists as future-version scaffolding, and the numbers track is on the roadmap but not yet in the codebase.
+[`AlphabetLevel`](Pismenka/Models/SkillLevel.swift), `NumberInstructionalBand`, and `ReadingStage` are separate tracks in the codebase. The alphabet and numbers tracks are active; `ReadingStage` exists as future-version scaffolding.
 
 ```
 Alphabet track (active, shipped):
 Novice → Beginner → Intermediate → Advanced → Expert crown
 
-Numbers track (planned next; NOT yet in the codebase):
-(no enum yet — number recognition / counting / quantity work,
- scheduled to land before the Czech reading layer is re-activated)
+Numbers track (active peer layer; NumberInstructionalBand, never derived from AlphabetLevel):
+Beginner → Developing → Strong → Fluent
+(number recognition 0–100; drives the numbers confusion-policy stage and grid freeze/clamp)
 
-Czech reading track (dormant; syllable/word sessions are not scheduled — each session plan clears `syllablesUnlockedAt` / `wordsUnlockedAt` even though graduation may briefly stamp unlock metadata; expected after numbers ship):
+Czech reading track (dormant; syllable/word sessions are not scheduled — each letters session plan clears `syllablesUnlockedAt` / `wordsUnlockedAt` even though graduation may briefly stamp unlock metadata; the next planned layer now that numbers have shipped):
 Locked → Syllable Starter → Reader → Word Builder → Storyteller
 ```
 
@@ -544,6 +589,7 @@ Session behavior:
 - `Profile.lastFrozenLetterOptionsPerRound` stores the previous session's frozen grid. Demotion hysteresis checks known **and** strong within 2 of the promotion thresholds **and** `gridPerformance[heldSize]?.supportsMaintenance` (recent ≥6 of last ≤8 samples at ≥75% accuracy; defaults to held while evidence is thin). Profiles that already had a 6/8 grid keep a continuity window until enough outcomes exist to demote on recent failure.
 - `instructionalBand` is separate. It gates similar-shape distractors, lowercase behavior, and visual-only lookalikes; it does not directly choose 4 vs 6 vs 8.
 - `LiveDifficulty == .easierUntilStreak` downshifts the displayed grid by **2 options per step** (`governorEaseSteps`, max 2: 8→6→4). Recovery requires **≥4 correct in the last 5 independent rounds** while the current eased `optionCount` is consistent with the step count, then steps back one tier at a time until `liveDifficulty` returns to `.normal` (a 3-round cooldown then blocks sticky re-trips from hearts-low / focus-accuracy latches).
+- Numbers sessions run the whole contract through twins: `Profile.numberOptionsPerRound` (pool safety 12 known / 8 strong for 6 options, 25 known / 18 strong for 8, `numberGridPerformanceStats` promotion, `lastFrozenNumberOptionsPerRound` hysteresis) freezes the session grid, and `resolvedNumberOptionCount` clamps per target. See [Numbers peer layer](#numbers-peer-layer).
 - Reading-layer slabika/word sessions are designed to stay at 4 options, but that layer is dormant in the current release.
 ### Daily spotlight, durable focus & scaffolding ladder
 
@@ -553,7 +599,7 @@ In the letter layer, the game now separates **daily variety** from **long-lived 
 |---|---|---|
 | Durable focus | `Profile.currentFocusLetter` plus `focusStartedDay` / `focusPracticedDays` | The letter the child is truly working through over multiple days, including scaffolding, remediation, graduation, and stuck-focus pause logic. |
 | Daily spotlight | `SessionPlan.dailySpotlightLetter` | A fresh introduction for variety and the current six-session retention cohort. It can be drilled for the session without clearing an in-flight durable focus. |
-| Introduced focus target | `SessionPlan.introducedFocusTarget` | The exact unit introduced today (currently always a letter in production). `GameView` uses this for the "New letter today!" overlay so the UI promise matches the unit the session intends to teach. |
+| Introduced focus target | `SessionPlan.introducedFocusTarget` | The exact unit introduced today — a `.letter(...)` in letters sessions, a `.number(...)` in numbers sessions. `GameView` uses this for the layer-aware "Meet your letter" / "Meet your number" intro overlay so the UI promise matches the unit the session intends to teach. |
 | Review/test plan set | `SessionPlan.weeklyReviewLetters` | Ordered audit letters for the current adaptive review/test plan. |
 | Frozen assessment cohort | `Profile.activeWeeklyAssessment.cohortLetters` | The exact letters being measured for retained/watch/review outcomes during the committed review/test day. |
 
@@ -561,7 +607,7 @@ This distinction is important. A daily new letter should not erase `FocusTeachin
 
 The UI contract is intentionally explicit: when `introducedNewFocusLetter == true`, the overlay displays `introducedFocusTarget?.displayText` first, then falls back to older plan fields only for legacy decoded checkpoints. It must not prefer `focusTarget` over the spotlight, because `focusTarget` can still represent the old durable focus while `dailySpotlightLetter` is the unit newly introduced today.
 
-The durable focus letter persists in `currentFocusLetter` until graduation, stuck-focus pause, or parent reset. Parent/dashboard preview of the next teachable letter is `Profile.snapshot.nextFocusCandidate` (`LetterDifficulty.nextFocusWithReason` with paused-focus blocking only). Runtime **daily spotlight** selection uses the same core picker via `ProfileManager.pickNextDailyIntroductionLetter`, but with a stricter `blocked` set (introduced, weekly cycle, unsafe weekly confusables, paused focus). When `currentFocusLetter` is nil on an introduction day, the spotlight may also become the durable focus. Reading sessions are typed via `FocusTarget` (see below) but do not run in the current release and therefore do not participate in the letter-only weekly assessment store.
+The durable focus letter persists in `currentFocusLetter` until graduation, stuck-focus pause, or parent reset. Parent/dashboard preview of the next teachable letter is `Profile.snapshot.nextFocusCandidate` (`LetterDifficulty.nextFocusWithReason` with paused-focus blocking only). Runtime **daily spotlight** selection uses the same core picker via `ProfileManager.pickNextDailyIntroductionLetter`, but with a stricter `blocked` set (introduced, weekly cycle, unsafe weekly confusables, paused focus). When `currentFocusLetter` is nil on an introduction day, the spotlight may also become the durable focus. Reading sessions are typed via `FocusTarget` (see below) but do not run in the current release and therefore do not participate in either weekly assessment store (letters use `activeWeeklyAssessment`; numbers use the twin `activeWeeklyNumberAssessment`).
 
 The picker prefers:
 
@@ -622,9 +668,29 @@ A letter focus graduates when `isFocusGraduated` flips on a target-attempt round
 - The graduation also **consumes today's formal-introduction quota** (sets the legacy-named `lastNewLetterDay = today`), so a same-day "Play again" doesn't silently introduce a fresh spotlight/focus. The next calendar day picks the next one.
 - If this graduation completes the whole alphabet, the current session stays in celebration/letter review; it does **not** interrupt the child with syllable calibration mid-session.
 
+### Numbers peer layer
+
+Numbers (0–100 recognition) ship as a full peer of letters with their own pedagogy, mirrored onto the same engine skeleton. The model lives in [`NumberDifficulty.swift`](Pismenka/Models/NumberDifficulty.swift) and [`NumberInstructionalBand.swift`](Pismenka/Models/NumberInstructionalBand.swift).
+
+**Per-number mastery.** `NumberStat` is a `typealias` of `LetterStat`, so numbers get the full evidence machinery for free: `recentResults`, target/exposure counters, the FSRS-inspired `memoryState` / `reviewPriority`, confusion evidence, response-time windows, and the `isKnown` / `isStrongKnown` / `isFluentKnown` / `isFocusGraduated` tiers. `Profile.knownNumbers` / `strongKnownNumbers` honor the stat's `parentOverride` field, but no numbers UI sets overrides today — the number dashboard has no mark-known/reset-override actions. `WeeklyNumberAssessment` is likewise a `typealias` of `WeeklyLetterAssessment` keyed by number strings.
+
+**Typed units and the bare-digit trap.** Number keys are bare digit strings (`"26"`) in `numberStats` and plan fields, but every typed surface uses the `number:` storage prefix: `FocusTarget.number("5").storageKey == "number:5"`. `FocusTarget(storageKey:)` treats any **bare single character as a letter** (`"5"` → `.letter("5")` — the initializer comment says so explicitly), so number paths must never round-trip bare digits through that initializer. Rounds record `RoundEvent.unitKind == .number`, which the numbers dashboard uses to filter the shared round log to number rounds only.
+
+**Introduction order & readiness.** `NumberDifficulty.introductionOrder` is 1…10, then 0, then the teens, then each decade as anchor-plus-fill (20, 21…29, 30, …), then 100. `isReadyToIntroduce` gates progression on evidence: 0 needs ≥ 7 known digits (or all 10 introduced), teens need ≥ 6 known digits, decade anchors need ≥ 3 known teens (or 15 introduced), within-decade fills need their anchor known/introduced, and 100 needs ≥ 3 known decade anchors (or 90 introduced). `nextFocusCandidate` additionally requires that a safe 4-option grid (3 distant distractors under `.avoid`) can actually be built before introducing a number.
+
+**Confusion policy (`NumberDifficulty.ConfusionPolicy`).** Four stages instead of the letters' three: `.avoid` → `.allowSameOnes` → `.allowSameTens` → `.intentionallyPractice`. The hard-confusable relations are digit **transposes** (`26` ↔ `62`), **lookalike digits** (6/9, 0/8, 1/7), and **cross-length containment** (`1` vs `10`, `2` vs `12`/`20`). Transposes and lookalikes/containment are blocked in every policy short of `.intentionallyPractice` (transposes stay blocked even at `.allowSameTens`); `.avoid` also excludes shared-tens and shared-ones digits and prefers distant decades, so a beginner's grid never puts `26` next to `24`. `pickDistractors` front-loads hard confusables under `.intentionallyPractice`, and `buildNumberRound` relaxes the policy tier by tier (`allowSameOnes` → `allowSameTens` → `intentionallyPractice`) before ever under-filling a grid.
+
+**Instructional band (`NumberInstructionalBand`).** Beginner → Developing → Strong → Fluent, derived in `Profile.snapshot` from introduced/known/strong-known **number** counts — never from `AlphabetLevel`: Developing at known ≥ 8 or introduced ≥ 15; Strong at known ≥ 20 or strong-known ≥ 12; Fluent at strong-known ≥ 40 or known ≥ 60. The band maps to the confusion stage (gentle / same-ones / same-tens / contrast) and, like the letters `instructionalBand`, is frozen at session start and persisted in `GameEngineSnapshot.numberBand` for checkpoint resume. Focus rounds are gentled: an actively scaffolded focus uses `.avoid`, and even a Fluent band's focus rounds cap at `.allowSameTens` — never straight to deliberate confusion drills. Rescue rounds and eased `LiveDifficulty` always fall back to `.avoid`.
+
+**Grid freeze & clamp twins.** `Profile.numberOptionsPerRound` (via `NumberInstructionalBand.numberOptionsPerRound`) mirrors the letters grid contract with numbers-scale thresholds: 6 options need known ≥ 12 and strong ≥ 8 plus `numberGridPerformanceStats[4].supportsPromotion(minimumTrials: 12)`; 8 options need known ≥ 25 and strong ≥ 18 plus `numberGridPerformanceStats[6].supportsPromotion(minimumTrials: 16)`; demotion hysteresis holds a previous 6/8 grid while counts stay within 2 of the thresholds and `supportsMaintenance` passes on the held size. The frozen session grid persists to `Profile.lastFrozenNumberOptionsPerRound` via `recordSessionFrozenNumberGrid`, and the per-round `resolvedNumberOptionCount` clamps weak / slipped / active-focus targets to 4 and strong-but-not-fluent targets to 6, with the same assessment-bucket caps as letters. `numberGridPerformanceStats` update on independent, non-impulsive adaptive-daily number target attempts at displayed counts of 4/6/8.
+
+**Focus ladder & trophies.** The number focus scaffolding level is day-derived — `numberFocusScaffoldingLevel = max(0, 4 − numberFocusActiveDays)` over the idempotent `numberFocusPracticedDays` set — and the stuck-focus pause twin fires at ≥ 8 practiced days below 50% recent accuracy (`pausedFocusNumbers`, 7-day cooldown). Graduation inserts into `everMasteredNumbers`, clears the focus, consumes the day's introduction quota (`lastNewNumberDay = today`), and updates the band trophies: `highestNumberBandEverReached` (monotonic) and `celebratedNumberBands` (one celebration per band, `.beginner` pre-celebrated on new profiles). Both trophies survive `resetAllProgress`, exactly like the alphabet crowns.
+
+**What numbers do not have.** No cameo injection (the `numberCameoExposureDay` / `numberCameoExposuresToday` fields are persisted reserved twins that nothing increments today), no `contrast`/`maintenance` phases, no case practice, no visual-only distractor tokens, no per-number parent overrides or notes UI, and no parent skip for an unfinished number progress check.
+
 ### Czech reading progression (dormant scaffolding)
 
-The Czech syllable and word layers are not reachable in the current release; this section documents the still-present scaffolding so future work can re-activate it without rediscovering the design. `ProfileManager.previewSessionPlan(...)` explicitly nils `syllablesUnlockedAt`, `wordsUnlockedAt`, `currentSyllableFocus`, and `currentWordFocus` and always leaves `primaryLayer` at `.letters`, so none of the gates below currently fire.
+The Czech syllable and word layers are not reachable in the current release; this section documents the still-present scaffolding so future work can re-activate it without rediscovering the design. The letters branch of `ProfileManager.buildSessionPlan(...)` explicitly nils `syllablesUnlockedAt`, `wordsUnlockedAt`, `currentSyllableFocus`, and `currentWordFocus` and never promotes `primaryLayer` beyond `.letters` (the numbers layer is scheduled through its own `buildNumberSessionPlan` branch), so none of the reading gates below currently fire.
 
 Czech reading is represented by typed learning units in [`LearningUnit.swift`](Pismenka/Models/LearningUnit.swift):
 
@@ -678,7 +744,8 @@ If the parent enables `readingPracticePaused` before that next session, the prof
 Current daily-session routing in production:
 
 ```
-letters only (primaryLayer = .letters; reading unlock fields cleared each session start)
+letters (primaryLayer = .letters; reading unlock fields cleared each session start)
+numbers (primaryLayer = .numbers via buildNumberSessionPlan when the home layer is Numbers)
 ```
 
 `GameState` already implements `syllableCalibration`, `syllableRecognition`, `syllableBlending`, `wordReading`, and `wordBuilding` when a `SessionPlan` supplies `primaryLayer` / `activityKind` (see model tests), but **`ProfileManager` does not schedule them** in the shipping planner: `isSyllableLayerEligible` is unused, there is no "every fifth round" blending scheduler, and word onboarding/calibration flags remain persisted placeholders until reading is re-enabled.
@@ -768,7 +835,7 @@ Letter rounds show a session-frozen baseline `letterOptionsPerRound` (4 by defau
 - **Even distribution across the session.** `sessionCorrectPositionCounts: [Int]` — preference rotates toward the least-used slot when ties allow.
 - **Focus target slot rotates.** `recentFocusCorrectPositions: [Int]` ensures a brand-new focus unit doesn't get parked in the same slot every drill round, which would let the child memorize position instead of symbol shape.
 
-`sessionCorrectPositionCounts` resizes with the current activity's option count, so a live-difficulty downshift or a 4-choice reading round can change the grid without corrupting position history. Both the base letter-grid size and the `instructionalBand` are frozen at session start, so level/evidence changes during a session do not silently resize the grid or unlock harder distractor behavior.
+`sessionCorrectPositionCounts` resizes with the current activity's option count, so a live-difficulty downshift or a narrower clamped round can change the grid without corrupting position history. Number rounds go through the same `placeAnswer` fairness rules with their own frozen `numberOptionsPerRound` baseline. Both the frozen grid sizes and the frozen bands (`instructionalBand` / `numberBand`) are set at session start, so level/evidence changes during a session do not silently resize the grid or unlock harder distractor behavior.
 
 Progress-check sessions are intentionally routed through `plainReview`, even for Expert profiles, so the adaptive audit stays separate from ordinary Expert `maintenance`. The detailed evidence-ordering and conservative distractor rules live in [Six-session retention progress check](#six-session-retention-progress-check).
 
@@ -784,7 +851,7 @@ Progress-check sessions are intentionally routed through `plainReview`, even for
 - `everMasteredLetters` — lifetime trophy set, used for alphabet-level math and session-end progress.
 - `knownSyllables`, `currentlyMasteredSyllables`, `everMasteredSyllables` — reading-layer equivalents.
 - `knownWords`, `currentlyMasteredWords`, `everMasteredWords` — word-layer equivalents.
-- `alphabetLevel`, `readingStage` — separate computed progress tracks; only the alphabet track is surfaced in the current UI.
+- `alphabetLevel`, `readingStage` — separate computed progress tracks; the alphabet track (and, via `numberInstructionalBand`, the numbers band) is surfaced in the current UI while `readingStage` stays dormant.
 - `learningLetters`, `unseenLetters`, `recentlySlipped` — dashboard and picker support pools.
 - `unseenSyllables`, `unseenWords` — curriculum-derived unseen pools.
 - `lettersByConfidence` — Wilson-only certainty ordering for parent display and easy distractors. No response-time discount: slow correct answers are still correct, and the right place to reward fluency is the additive `isFluentKnown` tier, not a subtractive penalty here.
@@ -793,6 +860,8 @@ Progress-check sessions are intentionally routed through `plainReview`, even for
 - `instructionalBand` — engine distractor/case band derived from `strongKnownLetters ∩ everMasteredLetters`; reading mastery does not raise this letter-session band in the current code.
 - `currentFocusTarget`, `nextFocusTarget` — typed focus state at the API edge, currently populated only for letters while the reading layer is dormant. The method signature still carries the future word-audio hook, but the current implementation returns a letter target or `nil` rather than synthesizing syllable/word previews.
 - `nextFocusCandidate` — letter-only preview retained for existing consumers; it is populated from the same prerequisite-aware letter picker used for focus selection.
+- `knownNumbers`, `strongKnownNumbers`, `currentlyMasteredNumbers`, `everMasteredNumbers`, `learningNumbers`, `unseenNumbers`, `recentlySlippedNumbers` — the numbers-layer equivalents of the letter pools, derived from `numberStats` with the same override-aware / focus-exception rules.
+- `numberInstructionalBand`, `highestNumberBandEver`, `totalNumbersInCurriculum` — the numbers band for the next session (never derived from `AlphabetLevel`), its monotonic trophy, and the 0–100 curriculum size. `parentNumberKnowledgeSummary(pool:)` is the numbers twin of the parent letter rollup, computed over a caller-supplied pool (the dashboards pass `numberKnowledgePool`, the introduced/practiced set — never all 101).
 
 The `instructionalBand` is computed from `strongKnownLetters ∩ everMasteredLetters`, floored at `.novice`. It is never stored on `Profile`; `AdaptiveGameState.init` freezes the snapshot value for the session and persists that frozen value in `GameEngineSnapshot` so a restored checkpoint keeps the same distractor/case band it started with. The separate base answer-grid size is `Profile.letterOptionsPerRound`; it is frozen into the game state, saved to `GameEngineSnapshot.letterOptionsPerRound`, and recorded back to `Profile.lastFrozenLetterOptionsPerRound` for the next session's hysteresis.
 
@@ -800,7 +869,7 @@ This prevents mismatches like "the dashboard says A is mastered but the game kee
 
 ### Hearts (5)
 
-Every non-impulsive wrong answer consumes one heart. The impulsive-tap threshold is adaptive: the **median of all pooled `recentResponseTimes` samples across the profile's letter stats** (not correct-only), multiplied by **0.35**, clamped between **0.35s** and **0.9s**, with **0.5s** as the fallback when fewer than four timing samples exist. These constants are heuristic tuning values from product judgment, not measurements from real children; they should be treated as provisional until validated. A tap faster than that after the grid appears is classified as `MistakeType.impulsiveTap` by `AdaptiveGameState`: it is logged and visible, but it does not count as a true learning miss and does not cost a heart. Assisted mastery-discounted attempts are the exception to the impulse shortcut: rescue/revealed wrong answers are persisted as `.confusion` even if fast, remain discounted from mastery via `AttemptContext`, and still cost a heart / feed `LiveDifficulty` like a real miss. This is intentional: once the child is in a helper path, repeated wrong taps are treated as struggle, not accidental exploration.
+Every non-impulsive wrong answer consumes one heart. The impulsive-tap threshold is adaptive: the **median of all pooled `recentResponseTimes` samples across the profile's letter stats** (not correct-only), multiplied by **0.35**, clamped between **0.35s** and **0.9s**, with **0.5s** as the fallback when fewer than four timing samples exist. (The pooling reads `letterStats` even during numbers sessions — number timing samples accumulate in `numberStats` but do not feed this threshold today, so a numbers-only profile uses the 0.5s fallback.) These constants are heuristic tuning values from product judgment, not measurements from real children; they should be treated as provisional until validated. A tap faster than that after the grid appears is classified as `MistakeType.impulsiveTap` by `AdaptiveGameState`: it is logged and visible, but it does not count as a true learning miss and does not cost a heart. Assisted mastery-discounted attempts are the exception to the impulse shortcut: rescue/revealed wrong answers are persisted as `.confusion` even if fast, remain discounted from mastery via `AttemptContext`, and still cost a heart / feed `LiveDifficulty` like a real miss. This is intentional: once the child is in a helper path, repeated wrong taps are treated as struggle, not accidental exploration.
 
 Hearts pace one sitting; daily-goal persistence is defined in [Daily goal, Winner button, and progress strip](#daily-goal-winner-button-and-progress-strip).
 
@@ -876,6 +945,8 @@ The contract is documented inline on `ProfileManager.buildSessionPlan` (`preview
 
 Net effect: a child can play 1 / 3 / 10 sessions on a single day, keep accruing real attempts, may graduate the active focus, but won't inflate the day streak, won't earn extra "active days" on the scaffolding ladder, won't be served a second formal spotlight/focus introduction beyond the day's quota, and won't get unlimited cameo letters through repeated same-day sessions.
 
+Numbers sessions follow the same contract through their twin fields (`numberDailyPractice*`, `numberDailyTargetAsk*`, `lastNewNumberDay`, `numberFocusPracticedDays`, `activeWeeklyNumberAssessment`), and because the day streak is shared, mixing letters and numbers sessions on one day still counts as a single "played today."
+
 ### Adaptive struggle response
 
 Mistakes no longer end adaptive daily or weekly review/test sessions by themselves. The child keeps playing until they tap Winner, leave with Home, or lose all hearts. Older checkpoints that contain the legacy `tiredSignal` value are ignored on restore when hearts remain, so a stale saved session cannot immediately jump to the summary screen.
@@ -920,7 +991,7 @@ The net effect: a distractible child who knows their letters is no longer silent
 
 The outcome helper reports `.pending`, `.retained`, `.watch`, `.observed`, or `.needsReview` according to the frozen bucket. Legacy decoded assessments default to the previous 4-attempt, 3-correct rule, so in-flight old tests remain readable and finish under their original contract.
 
-`RoundEvent` keeps the last 200 local-only events per profile. Each event stores target, displayed options, selected answer, correctness, response time, phase, `RoundIntent`, optional `unitKind`, optional `activityKind`, mistake type, replay count, discount status, optional `AttemptContext`, optional `cameoLetter`, `includedFocusAsDistractor`, optional `RoundPlanReason`, hearts after the answer, `LiveDifficulty`, and rescue metadata. There is deliberately no `RoundIntent.cameoExposure`: intent remains the primary pedagogical purpose, while cameo and focus-as-distractor are orthogonal flags so a single round can carry both signals.
+`RoundEvent` keeps the last 200 local-only events per profile — one shared log across layers. Each event stores target, displayed options, selected answer, correctness, response time, phase, `RoundIntent`, optional `unitKind`, optional `activityKind`, mistake type, replay count, discount status, optional `AttemptContext`, optional `cameoLetter`, `includedFocusAsDistractor`, optional `RoundPlanReason`, hearts after the answer, `LiveDifficulty`, and rescue metadata. Numbers rounds write `unitKind: .number` (with `number:`-prefixed storage keys); the numbers dashboard filters the shared log by that kind, while the letters dashboard's raw-history card is currently unfiltered. There is deliberately no `RoundIntent.cameoExposure`: intent remains the primary pedagogical purpose, while cameo and focus-as-distractor are orthogonal flags so a single round can carry both signals.
 
 `RoundIntent.weeklyAssessment` marks adaptive audit evidence rounds. `RoundPlanReason` is the machine-readable debug payload for generated rounds: primary goal, target source, distractor policy, and expected difficulty. It is not parent copy; it exists so tests and future simulation tooling can assert why the adaptive engine made a round. Weekly assessment rounds use `RoundPrimaryGoal.weeklyAssessment`; audit targets use `RoundTargetSource.weeklyAssessmentCohort`.
 
@@ -1001,28 +1072,31 @@ Setting any override clears that letter from the paused-focus cooldown. If a par
 
 ### Granular resets
 
-Five reset operations on `ProfileManager`, smallest blast radius first. Each is documented in code with its exact preserved/cleared field set:
+Reset operations on `ProfileManager`, smallest blast radius first. Each is documented in code with its exact preserved/cleared field set. The letters-layer resets have numbers twins:
 
 | Operation | Wipes | Preserves |
 |---|---|---|
 | `resetCalibrationOnly` | `hasCompletedCalibration` flag | All letter/syllable/word stats, focus, streak, trophies |
+| `resetNumberCalibrationOnly` | `hasCompletedNumberCalibration` flag | All number learning history |
 | `resetCurrentFocus` | `currentFocusLetter`, `currentSyllableFocus`, `currentWordFocus`, `focusStartedDay`, `focusPracticedDays`, `lastFocusSelection` | Letter/syllable/word stats, `lastNewLetterDay`, streak |
+| `resetCurrentNumberFocus` | `currentFocusNumber`, `numberFocusStartedDay`, `numberFocusPracticedDays`, `lastNumberFocusSelection` | Number stats; `lastNewNumberDay` is intentionally kept so the one-new-number-per-day rule still holds |
 | `resetLetterStats(letter:)` | One letter's `LetterStat` (counters, timestamps, override); removes it from `everMasteredLetters`, `introducedLetters`, and paused-focus cooldown state; clears focus if it **was** the focus; clears `lastFocusSelection` if it described that letter | Other letters, streak, calibration, lifetime trophy fields |
-| `resetStreak` | `dailyStreakCount`, `lastSessionDay` | `bestDailyStreak`, all learning stats, focus |
-| `resetAllProgress` | All learning history across letters/slabiky/words, calibration, unlock flags, focus, weekly assessment state/history, streak, mastery sets, introduced sets, paused-focus state, focus-selection reason, raw round events, plus `bestSessionStreak`, daily-practice day/counters/winner flags, `dailyTargetAskDay` / `dailyTargetAskCounts`, `weeklyIntroducedLetters`, `learningCycleStartDay`, `completedLetterSessionsInCycle`, and reading-layer scaffold flags | Avatar, name, language, and profile-level `parentNote`; `bestDailyStreak`, `highestAlphabetLevelEverReached`, `celebratedAlphabetLevels` (lifetime trophies); `lastFrozenLetterOptionsPerRound` and `gridPerformanceStats` are **not** cleared |
+| `resetNumberStats(number:)` | One number's `NumberStat`; removes it from `everMasteredNumbers`, `introducedNumbers`, and paused-focus cooldown state; clears the focus/`lastNumberFocusSelection` if they referenced that number | Other numbers, streak, calibration, band trophies |
+| `resetStreak` | `dailyStreakCount`, `lastSessionDay` | `bestDailyStreak`, all learning stats, focus. The streak is shared, so this affects both layers' "Day N" banner. |
+| `resetAllProgress` | **Both layers.** All learning history across letters/slabiky/words, calibration, unlock flags, focus, weekly assessment state/history, streak, mastery sets, introduced sets, paused-focus state, focus-selection reason, raw round events, `bestSessionStreak`, daily-practice day/counters/winner flags, `dailyTargetAskDay` / `dailyTargetAskCounts`, `weeklyIntroducedLetters`, `learningCycleStartDay`, `completedLetterSessionsInCycle`, reading-layer scaffold flags, **plus every number twin field**: `numberStats`, `introducedNumbers`, `everMasteredNumbers`, `currentFocusNumber` + focus days/selection, `hasCompletedNumberCalibration`, `lastNewNumberDay`, paused focus numbers, `numberDailyPractice*` / `numberCameoExposure*` / `numberDailyTargetAsk*`, `numberLearningCycleStartDay`, `weeklyIntroducedNumbers`, `completedNumberSessionsInCycle`, `activeWeeklyNumberAssessment`, `recentWeeklyNumberAssessments`, **and** `numberGridPerformanceStats` / `lastFrozenNumberOptionsPerRound` | Avatar, name, language, and profile-level `parentNote`; lifetime trophies in both layers: `bestDailyStreak`, `highestAlphabetLevelEverReached`, `celebratedAlphabetLevels`, `highestNumberBandEverReached`, `celebratedNumberBands`. Letter-grid evidence (`lastFrozenLetterOptionsPerRound` and `gridPerformanceStats`) is historically **not** cleared — an asymmetry with the numbers side, whose grid stats **are** wiped |
 
-`skipActiveWeeklyAssessment` is separate from the five resets: it archives the in-progress progress check, clears the active cycle, and may reset daily-practice counters so a same-day introduction can run (dashboard alert, no second gate).
+`skipActiveWeeklyAssessment` is separate from the resets: it archives the in-progress **letters** progress check, clears the active cycle, and may reset daily-practice counters so a same-day introduction can run (dashboard alert, no second gate). It has no numbers twin.
 
-`ProfileManager` stores `lastResetSnapshot` before each of the five reset APIs **and** before `deleteProfile`, enabling a single **Undo last reset** step on the dashboard. Undo restores the snapshotted profile JSON (re-appending a deleted profile when under the four-profile cap) but does **not** restore cleared `SessionCheckpointStore` envelopes. Dashboard confirmations call `checkpointStore.clear(profileId:)` so resume checkpoints do not disagree with wiped state.
+`ProfileManager` stores `lastResetSnapshot` before each reset API (letters and numbers) **and** before `deleteProfile`, enabling a single **Undo last reset** step on either dashboard. Undo restores the snapshotted profile JSON (re-appending a deleted profile when under the four-profile cap) but does **not** restore cleared `SessionCheckpointStore` envelopes. Dashboard confirmations call `checkpointStore.clear(profileId:)` (the numbers dashboard clears the `.numbers` layer slot) so resume checkpoints do not disagree with wiped state.
 
 `resetLetterStats` may lower the derived `alphabetLevel` if that letter was the only evidence holding the current tier (see `ProfileManager` comment).
 
 UI surfacing:
 
-- Per-letter wipe → letter row **Actions** dialog (**Wipe stats for …**), not a context menu.
-- Current-focus reset → dashboard overflow menu (`Pick a new focus letter`). The action also clears syllable/word focus in `ProfileManager`, but the current UI only shows it while a **letter** focus is active.
-- Calibration & streak resets → dashboard overflow menu (`Re-run calibration`, `Reset day streak`).
-- Full reset → `EditProfileView`'s "Reset progress" button.
+- Per-letter wipe → letter row **Actions** dialog (**Wipe stats for …**), not a context menu. Per-number reset → number map tile dialog (**Reset {n} (re-teach)**) on the numbers dashboard.
+- Current-focus reset → dashboard overflow menu (`Pick a new focus letter` / `Pick a new focus number`). The letters action also clears syllable/word focus in `ProfileManager`, but the current UI only shows it while a **letter** focus is active.
+- Calibration resets → each dashboard's overflow menu (`Re-run calibration` / `Re-run numbers calibration`); streak reset → letters dashboard overflow menu only (`Reset day streak`).
+- Full reset → `EditProfileView`'s "Reset progress" button (wipes both layers).
 - `readingPracticePaused` is persisted on `Profile` for the dormant reading layer but is **not** surfaced as a toggle anywhere in the current shipping UI. If/when the reading layer reactivates, an `EditProfileView` toggle would be the intended home.
 
 ---
@@ -1033,29 +1107,31 @@ UI surfacing:
 Pismenka/
 ├── PismenkaApp.swift              `PismenkaApp` entry, `PismenkaAppDelegate` (Firebase bootstrap), and `ContentView` first-launch gate + four-screen state machine with checkpoint resume
 ├── Models/
-│   ├── Profile.swift              Per-child profile (letter/syllable/word stats, weekly assessments, focus, streaks, trophies, `gridPerformanceStats`)
-│   ├── ProfileLearningSnapshot.swift  Single source of truth for derived learning state
-│   ├── LearningUnit.swift         UnitKind, FocusTarget, LearningActivityKind, LearningRound
-│   ├── LetterStat.swift           Per-letter mastery + LetterOverride + LetterKnowledgeState
+│   ├── Profile.swift              Per-child profile (letter/number/syllable/word stats, per-layer weekly assessments, focus twins, streaks, trophies, letter+number grid stats)
+│   ├── ProfileLearningSnapshot.swift  Single source of truth for derived learning state (letter pools + number pools/band, parent letter & number knowledge summaries)
+│   ├── LearningUnit.swift         UnitKind, FocusTarget (incl. `.number` + `number:` storage prefix), LearningLayer, LearningActivityKind, LearningRound
+│   ├── LetterStat.swift           Per-letter mastery + LetterOverride + LetterKnowledgeState (reused by numbers via the `NumberStat` typealias)
 │   ├── AdaptiveLearningScheduler.swift  FSRS-inspired memory model: LetterMemoryState (difficulty, stability, retrievability, due dates), review priority, pair-level LetterConfusionEvidence, GridPerformanceStat
 │   ├── UnitProgressStat.swift     Shared syllable/word mastery aggregate (dormant in current release)
 │   ├── LetterSymbol.swift         Typed API-edge wrapper for base/form/language
 │   ├── FocusSelectionReason.swift Persisted "why this focus?" explanation
 │   ├── RoundEvent.swift           Local rolling round log + RoundIntent/MistakeType/LiveDifficulty/RoundPlanReason
 │   ├── LetterDifficulty.swift     introductionOrder, diacriticBase, ConfusionPolicy, confusing pairs
+│   ├── NumberDifficulty.swift     0–100 introduction order, readiness gates, digit transpose/lookalike/containment rules, number ConfusionPolicy + distractor picker, calibration pool (incl. unwired age seed)
+│   ├── NumberInstructionalBand.swift  Numbers band (Beginner→Fluent), confusion-stage mapping, `numberOptionsPerRound` grid gates; `NumberStat` / `WeeklyNumberAssessment` typealiases
 │   ├── SyllableCurriculum.swift   Czech CV slabika DAG + syllable distractors (dormant)
 │   ├── WordCurriculum.swift       Czech seed words + playable word-pool gates (dormant)
 │   ├── CurriculumAudioAvailability.swift  Model-layer protocol for audio-backed curriculum gating
 │   ├── SkillLevel.swift           AlphabetLevel + ReadingStage (reading stages dormant), Comparable, trophy support, `letterOptionsPerRound` pool-safety + grid-performance gates
 │   ├── LocalDay.swift             Calendar-day value type (year/month/day, daysSince, today(); `nextSunday` exists but is unused by the live six-session planner)
-│   ├── GameState.swift            `SessionPlan`, `AdaptiveGameState` — phases, typed rounds, daily goals, progress-check targeting, spotlight drill, hearts, stamps, distractors, position fairness, governor
-│   ├── AppSettings.swift          Audio, comfort, reminders, case-practice, parent-gate, personalized-Czech-letters, first-launch onboarding (`hasCompletedFirstLaunchOnboarding`, `defaultGameLanguage`)
+│   ├── GameState.swift            `SessionPlan`, `AdaptiveGameState` — phases, typed rounds (letter + number builders), daily goals, progress-check targeting, spotlight drill, hearts, stamps, distractors, position fairness, governor, frozen letter/number bands and grids
+│   ├── AppSettings.swift          Audio, comfort, reminders, case-practice, parent-gate, personalized-Czech-letters, first-launch onboarding (`hasCompletedFirstLaunchOnboarding`, `defaultGameLanguage`), and the local-only `activeLearningLayer` Letters/Numbers switch (excluded from `AppSettingsSnapshot`)
 │   └── SessionCheckpoint.swift    Versioned exact-resume checkpoints
 ├── Services/
-│   ├── ProfileManager.swift       Profile CRUD; session lifecycle; six-session progress-check planner; assessment scoring; recordAnswer; overrides; granular resets. `buildSessionPlan` leaves `primaryLayer` at `.letters` and clears reading-unlock fields on every commit.
-│   ├── AudioService.swift         Bundled letter audio playback, SFX, missing-asset validation, optional Čermák personalized Czech letter prompts. `requiredCurriculumVoiceAssets(for:)` currently returns `[]`, so syllable/word validation is disabled in the current release.
+│   ├── ProfileManager.swift       Profile CRUD; layer-aware session lifecycle (`buildSessionPlan(layer:)` routes `.numbers` to `buildNumberSessionPlan`); per-layer six-session progress-check planners; assessment scoring; typed recordAnswer (letters + numbers); overrides; letter and number granular resets. The letters branch clears reading-unlock fields on every commit; only the reading layers are forced off.
+│   ├── AudioService.swift         Bundled letter + number audio playback, SFX, hard letter/SFX missing-asset validation plus soft `missingNumberAssetNames` diagnostic, `playNumber` with spoken-word TTS fallback (`NumberSpokenForm`), optional Čermák personalized Czech letter prompts. `requiredCurriculumVoiceAssets(for:)` currently returns `[]`, so syllable/word validation is disabled in the current release.
 │   ├── HapticService.swift        Haptic feedback wrapper
-│   ├── SessionCheckpointStore.swift  Local resume-checkpoint persistence
+│   ├── SessionCheckpointStore.swift  Local resume-checkpoint persistence, one slot per learning layer (letters / numbers)
 │   ├── NotificationService.swift  Parent opt-in local reminder (7:00 AM local time)
 │   ├── ProfileExportService.swift Versioned JSON backup import/export
 │   └── FirebaseBackupService.swift Sign in with Apple + Google + Firestore recovery mirror
@@ -1063,20 +1139,21 @@ Pismenka/
 │   └── RoutingCoverage.geojson    Marketing/availability map; not consumed by app gameplay
 ├── Views/
 │   ├── Profile/
-│   │   ├── ProfileSelectView.swift
+│   │   ├── ProfileSelectView.swift  Profile cards with layer-aware Confident n/m, pinned Letters/Numbers switch, layer-aware View-results routing
 │   │   ├── ParentGateView.swift   Parent gate: swipe-up or accessible hold-buttons mode
 │   │   ├── CreateProfileView.swift  Also defines `FirstLaunchOnboardingView` (language + optional backup)
 │   │   └── EditProfileView.swift  Avatar + name editing, Reset progress, Delete profile (parent-gated). No reading-practice toggle in the current shipping UI.
 │   ├── Game/
-│   │   ├── CalibrationView.swift  One-time calibration: early stop ~10–12 when evidence is clear; otherwise up to 20–22 rounds (pool ×2)
-│   │   ├── GameView.swift         Adaptive game session
+│   │   ├── CalibrationView.swift  One-time per-layer calibration (letters pool + name seed, or numbers 1…10 pool via `NumberDifficulty.calibrationPool()`): early stop ~10–12 when evidence is clear; otherwise up to 20–22 rounds (pool ×2)
+│   │   ├── GameView.swift         Adaptive game session (letters or numbers per `plan.primaryLayer`; layer-aware intro overlay and Winner claim)
 │   │   └── EasyModeGrid.swift     Defines `LetterGrid` + `LetterButton`; renders the option tiles
 │   ├── Summary/
 │   │   └── SummaryView.swift      Defines `SessionEndView` (file kept named for project stability)
 │   ├── Settings/
 │   │   └── SettingsView.swift     Music toggle, voice-and-sounds (SFX) toggle, Personalized letters (Čermák), Reduce motion, Confetti, Parent gate, Case practice, Daily reminder, Audio check, Export/Import backup, cloud recovery, Copy diagnostic summary. Also defines `AudioCheckView`, which exposes only the first four language letters as `Replay "Find X"` plus the replayable game SFX clips (`Correct`, `Wrong`, `Streak 5`, `Streak 10`, `Click`).
 │   ├── Parent/
-│   │   └── ParentDashboardView.swift  Three-tier parent dashboard: Tier 1 (header/recommendation/needs-attention/focus/progress-glance + the green/yellow/red letter-map palette over the full alphabet), Tier 2 (progress-check summary, sortable+filterable letters list, reading progress — the reading-progress section is dormant), Tier 3 (collapsible diagnostics for retention/test rounds/confusions/raw history). Glossary alert + ellipsis menu for overrides, granular resets, progress-check skip.
+│   │   ├── ParentDashboardView.swift  Three-tier letters dashboard: Tier 1 (header/recommendation/needs-attention/focus/progress-glance + the green/yellow/red letter-map palette over the full alphabet), Tier 2 (progress-check summary, sortable+filterable letters list, reading progress — the reading-progress section is dormant), Tier 3 (collapsible diagnostics for retention/test rounds/confusions/raw history). Glossary alert + ellipsis menu for overrides, granular resets, progress-check skip.
+│   │   └── ParentNumberDashboardView.swift  Focused numbers sibling: header with band chip, knowledge buckets + number map over the introduced pool (`numberKnowledgePool`), recent number rounds (filtered by `unitKind == .number`), common confusions, numbers-layer resets and extra practice. Also defines the `numberKnowledgePool` snapshot extension.
 │   └── Components/
 │       ├── ConfettiView.swift
 │       ├── DesignSystem.swift     Brand colors, typography, button styles, `BrandBackground`
@@ -1144,6 +1221,22 @@ Each `Profile` carries:
 | `gridPerformanceStats` | `[Int: GridPerformanceStat]` | Independent recognition outcomes keyed by displayed option count (4 / 6 / 8). Feeds promotion and maintenance in `AlphabetLevel.letterOptionsPerRound`; updated on independent adaptive-daily target attempts. |
 | `hasCompletedCalibration` | `Bool` | Routes to letter calibration on first launch |
 | `hasCompletedSyllableOnboarding`, `hasCompletedSyllableCalibration`, `hasCompletedWordOnboarding`, `hasCompletedWordCalibration` | `Bool` | Reading-layer intro/calibration receipts |
+| `numberStats` | `[String: NumberStat]` | Per-number mastery, keyed by bare digit string (`"0"`…`"100"`); `NumberStat` is a `typealias` of `LetterStat` |
+| `introducedNumbers`, `everMasteredNumbers` | `Set<String>` | Numbers intentionally introduced as focus/target; lifetime number mastery set |
+| `currentFocusNumber`, `numberFocusStartedDay`, `numberFocusPracticedDays` | `String?`, `LocalDay?`, `Set<LocalDay>` | Durable number focus and its idempotent practice-day ladder (`numberFocusActiveDays` is the set count; `numberFocusScaffoldingLevel = max(0, 4 − days)`) |
+| `lastNewNumberDay` | `LocalDay?` | One-formal-number-introduction-per-day gate (also consumed by number focus graduation) |
+| `pausedFocusNumbers`, `pausedFocusNumberDays` | `Set<String>`, `[String: LocalDay]` | Numbers stuck-focus escape hatch with the same 7-day cooldown |
+| `lastNumberFocusSelection` | `FocusSelectionReason?` | Provenance of the most recent number-focus pick |
+| `hasCompletedNumberCalibration` | `Bool` | Routes to numbers calibration on the first Numbers-mode profile tap |
+| `numberDailyPracticeDay`, `numberDailyPracticeAttempts` | `LocalDay?`, `Int` | Numbers twin of the visible daily progress counter |
+| `numberDailyPracticeWinnerClaimedDay`, `numberDailyPracticeWinnerClaimedMilestone` | `LocalDay?`, `Int` | Numbers twin of the Winner claim receipt |
+| `numberDailyTargetAskDay`, `numberDailyTargetAskCounts` | `LocalDay?`, `[String: Int]` | Numbers twin of the per-day target-ask cap seed |
+| `numberCameoExposureDay`, `numberCameoExposuresToday` | `LocalDay?`, `Int` | Reserved numbers cameo budget twins — persisted, but nothing increments them today (numbers rounds do not inject cameos) |
+| `numberLearningCycleStartDay`, `weeklyIntroducedNumbers` | `LocalDay?`, `Set<String>` | Numbers twin of the cycle start / spotlight cohort |
+| `completedNumberSessionsInCycle` | `Int` | Claimed 25-answer number sessions in the current cycle; the next numbers session becomes a progress check at six |
+| `activeWeeklyNumberAssessment`, `recentWeeklyNumberAssessments` | `WeeklyNumberAssessment?`, `[WeeklyNumberAssessment]` | Numbers twin of the frozen progress-check audit and its capped history (`WeeklyNumberAssessment` is a `typealias` of `WeeklyLetterAssessment`) |
+| `numberGridPerformanceStats`, `lastFrozenNumberOptionsPerRound` | `[Int: GridPerformanceStat]`, `Int?` | Numbers twin of the grid promotion evidence and frozen-grid hysteresis baseline. Unlike the letter fields, both **are** wiped by `resetAllProgress` |
+| `highestNumberBandEverReached`, `celebratedNumberBands` | `NumberInstructionalBand`, `Set<NumberInstructionalBand>` | Monotonic numbers band trophy and one-celebration-per-band receipts (`.beginner` pre-celebrated); preserved across resets like the alphabet crowns |
 | `parentNote` | `String?` | Free-form parent note attached to the profile. Informational only; never feeds the adaptive model. (`LetterStat` has its own per-letter `parentNote` with the same contract.) |
 
 `Profile`, `LetterStat`, `UnitProgressStat`, `WeeklyLetterAssessment`, `RoundEvent`, `SessionPlan`, and checkpoint snapshots implement tolerant `Codable` paths where needed so older payloads or missing new fields decode cleanly (e.g., legacy `Date` fields → `LocalDay`, `lifetimeAttempts` → `targetAttempts`, missing `RoundEvent` cameo/focus fields, missing daily-goal/session-plan fields such as `introducedFocusTarget`, and old `GameEngineSnapshot` payloads without `instructionalBand`).
@@ -1155,6 +1248,7 @@ Hardening migrations are intentionally additive; no on-disk schema bump is requi
 - `Profile.dailyPracticeDay`, `dailyPracticeAttempts`, `learningCycleStartDay`, and `weeklyIntroducedLetters` default to nil/zero/empty on old profiles. They start participating the next time a daily plan is committed.
 - `Profile.activeWeeklyAssessment` defaults to nil and `recentWeeklyAssessments` defaults to empty on old profiles. New progress-check assessment history begins with the first committed six-session review/test after this code runs; old aggregate `LetterStat` history is not backfilled into fake retained/watch/review verdicts.
 - `Profile.gridPerformanceStats` defaults to empty on older profiles; until enough independent outcomes exist at the current grid size, promotion stays at 4 options even when known/strong pool-safety thresholds are met. Existing 6/8-grid profiles keep a continuity window via `lastFrozenLetterOptionsPerRound` + `supportsMaintenance` until demotion evidence appears.
+- Every number twin field decodes with a nil/zero/empty default on pre-numbers profiles. A few get smarter backfills: `introducedNumbers` is seeded from `numberStats` keys plus the focus number when absent, graduated stats re-seed `everMasteredNumbers`, `completedNumberSessionsInCycle` backfills from the claimed number Winner milestone, and the band trophies (`highestNumberBandEverReached` / `celebratedNumberBands`) are derived from current number evidence when missing.
 - `SessionPlan.dailyGoalTarget`, `dailyGoalStartCount`, `dailyPracticeKind`, `weeklyReviewLetters`, `dailySpotlightLetter`, and `dailyGoalClaimedCount` all have decode defaults so older checkpoints or tests that lack the new fields still load. Older plans default to a 25-round introduction day with zero starting progress and no spotlight.
 - `readingPracticePaused` reads legacy `postExpertPracticePaused` payloads; new saves write the broader reading-practice name.
 - `pausedFocusLetters` defaults to empty on older profiles, and legacy paused letters get a migration-time `pausedFocusLetterDays` value for the 7-day cooldown.
@@ -1172,11 +1266,15 @@ Schema versions:
 | Payload | Current schema / storage |
 |---|---:|
 | UserDefaults profiles | Key `pismenka_profiles_v2`; payload is a JSON `[Profile]` array (no envelope wrapper) |
-| Local JSON export | `ProfileExportEnvelope.currentSchemaVersion = 2` |
-| Firebase backup | `CloudBackupEnvelope.currentSchemaVersion = 2` |
-| Session checkpoint | `SessionCheckpointEnvelope.currentSchemaVersion = 2`; stored locally under `pismenka_session_checkpoint_v1` |
+| Local JSON export | `ProfileExportEnvelope.currentSchemaVersion = 3` (schema 2 imports still decode — schema 2 predates the numbers layer, so profiles decode with number defaults and the envelope upgrades to 3 in memory; re-exports never write schema 2) |
+| Firebase backup | `CloudBackupEnvelope.currentSchemaVersion = 3` (same schema-2 upgrade path as local export) |
+| Session checkpoint | `SessionCheckpointEnvelope.currentSchemaVersion = 2`; stored locally under `pismenka_session_checkpoint_v2` as a per-layer map keyed by `LearningLayer.rawValue` (`"letters"` / `"numbers"`) |
 
-`SessionCheckpointEnvelope` fields: `schemaVersion`, `profileId`, `kind` (`.calibration` | `.game`), `savedAt`, plus kind-specific payloads — `calibration: CalibrationSnapshot?` (schedule, index, grid, intro/finale flags) or `sessionPlan: SessionPlan?` + `game: GameEngineSnapshot?` for in-progress adaptive sessions (`SessionPlan` is defined in `GameState.swift`; `GameEngineSnapshot` in `SessionCheckpoint.swift`). `SessionCheckpointStore` keeps one global envelope under `pismenka_session_checkpoint_v1`, not a per-profile key.
+`SessionCheckpointEnvelope` fields: `schemaVersion`, `profileId`, `kind` (`.calibration` | `.game`), `learningLayer` (pre-layer envelopes decode as `.letters`), `savedAt`, plus kind-specific payloads — `calibration: CalibrationSnapshot?` (schedule, index, grid, intro/finale flags) or `sessionPlan: SessionPlan?` + `game: GameEngineSnapshot?` for in-progress adaptive sessions (`SessionPlan` is defined in `GameState.swift`; `GameEngineSnapshot` in `SessionCheckpoint.swift`). `SessionCheckpointStore` keeps **one slot per learning layer** under `pismenka_session_checkpoint_v2`, so switching the home-screen layer never discards the other layer's in-flight session; clearing one layer's slot leaves the other intact. A legacy single-slot envelope under `pismenka_session_checkpoint_v1` migrates into the letters slot on first load, and the old key is removed.
+
+**Shared streak vs. twin counters.** Letters and numbers share one day-streak engine: `dailyStreakCount` / `lastSessionDay` are single fields, so a numbers session after a letters session on the same `LocalDay` counts as "played today" without double-incrementing the streak. Everything cycle- and goal-related is a **per-layer twin**: `completedLetterSessionsInCycle` / `completedNumberSessionsInCycle`, `dailyPractice*` / `numberDailyPractice*`, `learningCycleStartDay` / `numberLearningCycleStartDay`, `activeWeeklyAssessment` / `activeWeeklyNumberAssessment`, and so on. Claiming a Winner with `layer: .numbers` moves only the numbers cycle counter and vice versa.
+
+**Active layer is local-only.** `AppSettings.activeLearningLayer` (the Letters/Numbers home-screen switch) persists in `UserDefaults` but is deliberately **excluded from `AppSettingsSnapshot`**, so cloud backup/restore never overwrites which layer a device is showing.
 
 ---
 
@@ -1188,7 +1286,11 @@ Schema versions:
 
 ### Audio
 
-The live required audio surface is **letter prompts plus game SFX**. The reading layer is dormant, so syllable / blend / word recordings are not required, validated, reported in the parent audio check, or reachable in normal gameplay. The Xcode project includes `Pismenka/Sounds/` as a folder resource, so everything currently in that folder is bundled; only the live surface below is required by `AudioService.missingAssetNames(...)`.
+The live required audio surface is **letter prompts plus game SFX**. Number prompts under `Sounds/Numbers/` are part of the shipped curriculum surface for Numbers mode, but they stay on the **soft** validation path (see below) so a partial pack never bricks launch. The reading layer is dormant, so syllable / blend / word recordings are not required, validated, reported in the parent audio check, or reachable in normal gameplay. The Xcode project includes `Pismenka/Sounds/` as a folder resource, so everything currently in that folder is bundled; only the hard-required letter+SFX surface below is enforced by `AudioService.missingAssetNames(...)`.
+
+Number voice clips (`{en|cz}_{0…100}.m4a` under `Sounds/Numbers/` — 202 files) are validated **softly**: `AudioService.missingNumberAssetNames(...)` is a diagnostic deliberately kept out of `missingAssetNames`. A **missing** number clip degrades to runtime `AVSpeechSynthesizer` with the same spoken-word forms the generator uses (`NumberSpokenForm`: "twenty-six" / "dvacet šest" — never the raw digit string). Note the fallback fires only when the file is absent from the bundle (`resolveURL` returns nil); a present-but-broken file does not reroute to TTS.
+
+**Current pack state (verify before shipping).** The 202 files in the repo snapshot are tiny **placeholder stubs** — essentially empty ~257-byte M4A containers, versus ~15–25 KB per real Chirp letter clip — so they carry no usable audio. The intended ship path is regenerating the pack with the same Google Chirp pipeline as the letters (`python3 generate_audio_assets.py --provider google --numbers --force --skip-sfx`, see [Recording voice](#recording-voice)); until that runs, either replace the stubs with real clips or delete them so the spoken-word TTS fallback can engage at runtime.
 
 Live required files are organized into subdirectories that the private `resolveBundledAudioURL` helper in `AudioService.swift` searches in order:
 
@@ -1197,6 +1299,9 @@ Pismenka/Sounds/
 ├── Letters/                         # default English + Czech letter prompts
 │   ├── en_a.m4a … en_z.m4a
 │   └── cz_a.m4a … cz_z.m4a + every Czech diacritic in GameLanguage.czech.letters
+├── Numbers/                         # English + Czech number prompts (0…100)
+│   ├── en_0.m4a … en_100.m4a
+│   └── cz_0.m4a … cz_100.m4a
 ├── PersonalizedLetters/
 │   └── Cermak/                      # optional Čermák-family Czech letter pack
 │       └── cz_<letter>.m4a          # mirrors the base Czech letter set the family has recorded
@@ -1225,7 +1330,7 @@ Visual-only distractors (`1`, `rn`) do not need prompt audio because they are ne
 
 #### Recording voice
 
-The shipped default letter recordings use **Google Cloud Text-to-Speech Chirp 3 HD**:
+All curriculum voice clips (letters **and** numbers) are **machine-generated** — there is no human-recording step in the shipping pipeline. The shipped default letter (and intended shipped number) recordings use **Google Cloud Text-to-Speech Chirp 3 HD**:
 
 - Czech: `cs-CZ-Chirp3-HD-Achernar`.
 - American English: `en-US-Chirp3-HD-Aoede`.
@@ -1237,18 +1342,25 @@ python3 generate_audio_assets.py --provider google --only-czech-letters --force 
 python3 generate_audio_assets.py --provider google --only-english-letters --force --skip-sfx
 ```
 
-`generate_audio_assets.py` uses the active `gcloud` project as the quota project, or `GOOGLE_OAUTH_ACCESS_TOKEN` / `GOOGLE_CLOUD_PROJECT` when those environment variables are set. Override the default voices with `GOOGLE_CZ_VOICE` or `GOOGLE_EN_VOICE`. The script's default `--provider` is `say` (macOS Samantha/Zuzana); the shipped default letter sets were generated with `--provider google` and the Chirp 3 HD voices above. The Google provider also carries the reviewed Czech pronunciation overrides for the cases Google otherwise expands awkwardly: standalone long vowels, `ě`, `x`, `ý`, and `z`.
+Regenerate the full Numbers pack (0…100 × EN/CZ = 202 files) the same way — word-form prompts and Czech counting overrides (`jedna` / `dvě`, compounds like `dvacet jedna`) live in `generate_audio_assets.py` (`NUMBER_SPOKEN_FORMS` / Google text overrides); never feed digit strings to TTS:
+
+```bash
+python3 generate_audio_assets.py --provider google --numbers --force --skip-sfx
+```
+
+`generate_audio_assets.py` uses the active `gcloud` project as the quota project, or `GOOGLE_OAUTH_ACCESS_TOKEN` / `GOOGLE_CLOUD_PROJECT` when those environment variables are set. Override the default voices with `GOOGLE_CZ_VOICE` or `GOOGLE_EN_VOICE`. The script's default `--provider` is `say` (macOS Samantha/Zuzana) for offline scaffolding; the **shipped** default letter sets were generated with `--provider google` and the Chirp 3 HD voices above, and numbers should match that same Google Chirp pipeline before release. The Google provider also carries the reviewed Czech pronunciation overrides for the cases Google otherwise expands awkwardly: standalone long vowels, `ě`, `x`, `ý`, and `z`, plus the number spoken-form table.
 
 Prompts keep pronunciation-friendly punctuation: Czech letter prompts use a comma pause such as `Bé, jako banán.`. The dormant reading-layer prompts are designed to use comma-separated components (`m, á, má` for blends, `má, ma` for segmented words) and natural lowercase for fluent reads (`máma`).
 
 When the reading layer reactivates, syllable/word recordings will be required `.m4a` files for every seeded curriculum unit — slabiky use `cz_syl_<key>.m4a` and `cz_blend_<key>.m4a`, words use `cz_word_<key>.m4a` and `cz_word_<key>_slabikované.m4a` — and the child-facing prompts will not fall back to system speech because Czech vowel length and prosody are part of the lesson. The curriculum gates in `SyllableCurriculum`, `WordCurriculum`, and `wordsShouldUnlock` already consult `CurriculumAudioAvailability`, so a missing recording will keep that unit out of onboarding, calibration, focus selection, and word prerequisites, and gameplay will replan around it.
 
-The current `Pismenka/Sounds/` snapshot contains **only** the live letter-and-SFX surface (115 git-tracked audio files):
+The current `Pismenka/Sounds/` snapshot contains the live letter-and-SFX surface plus the Numbers pack:
 
 - Six gameplay SFX clips (`sfx_correct.mp3`, `sfx_wrong.mp3`, `sfx_streak_5.mp3`, `sfx_streak_10.mp3`, `sfx_click.mp3`, `sfx_applause.mp3`).
 - Daily-Winner celebration voice clip: `sfx_wow_en.m4a` ("Wow!"), played for every profile language.
 - English base letters `en_a.m4a` … `en_z.m4a` (26 files) in `Sounds/Letters/`.
 - Czech base letters `cz_a.m4a` … `cz_z.m4a` plus every diacritic letter in `GameLanguage.czech.letters` (`cz_á`, `cz_č`, `cz_ď`, `cz_ě`, `cz_é`, `cz_í`, `cz_ň`, `cz_ó`, `cz_ř`, `cz_š`, `cz_ť`, `cz_ú`, `cz_ů`, `cz_ý`, `cz_ž`) — 41 files total in `Sounds/Letters/`.
+- Numbers `en_0.m4a` … `en_100.m4a` and `cz_0.m4a` … `cz_100.m4a` (202 files) in `Sounds/Numbers/`. **Currently placeholder stubs** (~257 bytes each, no usable audio) — regenerate with `--provider google` (Chirp 3 HD, same voices as the letters) before release; a local `--provider say` pass is only offline scaffolding.
 - Optional Čermák personalized Czech letter pack in `Sounds/PersonalizedLetters/Cermak/` (41 files), used only when the parent unlocks the **Personalized letters** setting. The current pack mirrors the full Czech alphabet.
 - **Not bundled today:** Czech reading-layer clips (`cz_syl_*`, `cz_blend_*`, `cz_word_*`, segmented `cz_word_*_slabikované`), legacy decomposed letter filenames, or a `Sounds/Blends/` subdirectory. Older generations of those files may still exist under repo backup folders outside the app target; they are intentionally omitted from the shipped bundle while the reading layer stays dormant.
 
@@ -1536,7 +1648,7 @@ service cloud.firestore {
 
 ## Technical notes
 
-- **Exact resume** — `ContentView` restores an in-progress calibration or adaptive game from `SessionCheckpointStore` on launch; checkpoints clear on normal session end, home, profile delete/reset, backup import merge, and other explicit `checkpointStore.clear(...)` paths. Selecting a different profile from the profile picker does not delete another profile's saved checkpoint; only one checkpoint is stored at a time, keyed by `profileId`.
+- **Exact resume** — `ContentView` restores an in-progress calibration or adaptive game from `SessionCheckpointStore` on launch; checkpoints clear on normal session end, home, profile delete/reset, backup import merge, and other explicit `checkpointStore.clear(...)` paths. Selecting a different profile from the profile picker does not delete another profile's saved checkpoint; one checkpoint is stored per learning layer (letters / numbers), each keyed by `profileId`.
 - **Portrait lock** — the app only runs in portrait orientation.
 - **Third-party cloud** — Firebase Auth + Firestore and Google Sign-In provide recovery without Apple iCloud entitlements. Firebase Analytics / Crashlytics are not integrated.
 - **iOS 17.0+ runtime; Xcode 16+ to build.** The project sets `IPHONEOS_DEPLOYMENT_TARGET = 17.0`; minimum Xcode is documented in `README.md`, not in `project.pbxproj`.

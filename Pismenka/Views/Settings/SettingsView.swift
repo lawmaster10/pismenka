@@ -174,7 +174,10 @@ struct SettingsView: View {
     }
 
     private func updateReminder() {
-        notificationService.updateDailyReminder(enabled: settings.remindersEnabled)
+        notificationService.updateDailyReminder(
+            enabled: settings.remindersEnabled,
+            layer: settings.activeLearningLayer
+        )
     }
 
     private func exportProfiles() {
@@ -816,8 +819,11 @@ struct AudioCheckView: View {
 
     let profile: Profile?
 
+    @State private var missingNumberAssets: [String] = []
+
     private var language: GameLanguage { profile?.language.resolvedLanguage ?? .system.resolvedLanguage }
     private var samples: [String] { Array(language.letters.prefix(4)) }
+    private let numberSamples = ["3", "7", "15"]
 
     var body: some View {
         NavigationView {
@@ -826,6 +832,13 @@ struct AudioCheckView: View {
                     ForEach(samples, id: \.self) { letter in
                         Button("Replay “Find \(letter)”") {
                             audioService.playFindPrompt(letter: letter, language: language)
+                        }
+                    }
+                }
+                Section("Numbers voice") {
+                    ForEach(numberSamples, id: \.self) { number in
+                        Button("Replay “Find \(number)”") {
+                            audioService.playNumber(number, language: language)
                         }
                     }
                 }
@@ -849,6 +862,26 @@ struct AudioCheckView: View {
                             .foregroundColor(.orange)
                     }
                 }
+                // Numbers pack is a soft check: missing clips fall back to the
+                // spoken-word TTS form, so they never block the letter game.
+                Section("Number audio pack (optional)") {
+                    if missingNumberAssets.isEmpty {
+                        Text("All number clips found.")
+                    } else {
+                        Text("\(missingNumberAssets.count) number clip\(missingNumberAssets.count == 1 ? "" : "s") missing — spoken-word fallback will be used.")
+                            .foregroundColor(.orange)
+                        ForEach(missingNumberAssets.prefix(8), id: \.self) { asset in
+                            Text(asset).foregroundColor(.secondary)
+                        }
+                        if missingNumberAssets.count > 8 {
+                            Text("…and \(missingNumberAssets.count - 8) more.")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                missingNumberAssets = audioService.missingNumberAssetNames(for: [language])
             }
             .navigationTitle("Audio Check")
             .toolbar {
