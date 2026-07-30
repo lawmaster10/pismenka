@@ -15,16 +15,24 @@ enum NumberDifficulty {
 
     static let allNumberSet: Set<String> = Set(allNumbers)
 
-    /// Calibration / first-band pool: 1…10.
-    static let earlyRecognitionNumbers: [String] = (1...10).map(String.init)
+    /// How many brand-new numbers an introduction-day session may add.
+    /// Kids burn through 0…10 quickly; two per day keeps the pool stimulating.
+    static let maxNewNumbersPerDay = 2
+
+    /// Calibration / first-band pool: 0…20.
+    static let earlyRecognitionNumbers: [String] = (0...20).map(String.init)
 
     /// Pedagogical introduction order.
-    /// 1…10, then 0, then teens, then per decade anchor + fill, then 100.
+    /// Digits 1…10, then 0, then 11…20, then decade fill from 21…, then 100.
     static let introductionOrder: [String] = {
         var order: [String] = (1...10).map(String.init)
         order.append("0")
-        order.append(contentsOf: (11...19).map(String.init))
-        for decade in 2...9 {
+        order.append(contentsOf: (11...20).map(String.init))
+        // 20 is already in the early band; decade 2 continues at 21…29.
+        for ones in 1...9 {
+            order.append(String(20 + ones))
+        }
+        for decade in 3...9 {
             let anchor = String(decade * 10)
             order.append(anchor)
             for ones in 1...9 {
@@ -35,16 +43,16 @@ enum NumberDifficulty {
         return order
     }()
 
-    /// Calibration / first-band pool: 1…10.
+    /// Calibration / first-band pool: 0…20.
     ///
     /// Optional `ageNumber` mirrors the letter name-seed: when the child's age
-    /// is known and falls in 1…10, that digit is ensured in the schedule
+    /// is known and falls in 0…20, that digit is ensured in the schedule
     /// (personally meaningful, same idea as `LetterDifficulty.calibrationPool(nameLetter:)`).
     /// Not wired from `CalibrationView` today because `Profile` has no age field;
     /// keep the hook ready for when age is collected.
     static func calibrationPool(ageNumber: Int? = nil) -> [String] {
         var pool = earlyRecognitionNumbers
-        if let age = ageNumber, (1...10).contains(age) {
+        if let age = ageNumber, (0...20).contains(age) {
             let key = String(age)
             if !pool.contains(key) {
                 pool.append(key)
@@ -267,17 +275,10 @@ enum NumberDifficulty {
     ) -> Bool {
         guard let value = Int(key) else { return false }
 
-        let digitsKnown = (1...10).map(String.init).filter { known.contains($0) }.count
-        let digitsIntroduced = (1...10).map(String.init).filter { introduced.contains($0) }.count
-
-        if (1...10).contains(value) {
+        // Early band 0…20 is freely introducible (two-per-day pacing is the
+        // only throttle). Later decades still require prior footholds.
+        if (0...20).contains(value) {
             return true
-        }
-        if value == 0 {
-            return digitsKnown >= 7 || digitsIntroduced >= 10
-        }
-        if (11...19).contains(value) {
-            return digitsKnown >= 6
         }
         if value == 100 {
             let anchorsKnown = [20, 30, 40, 50, 60, 70, 80, 90]
@@ -286,7 +287,7 @@ enum NumberDifficulty {
                 .count
             return anchorsKnown >= 3 || introduced.contains("90")
         }
-        if value % 10 == 0, (20...90).contains(value) {
+        if value % 10 == 0, (30...90).contains(value) {
             let teensKnown = (11...19).map(String.init).filter { known.contains($0) }.count
             return teensKnown >= 3 || introduced.contains("15")
         }

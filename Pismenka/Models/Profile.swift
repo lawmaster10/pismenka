@@ -492,8 +492,40 @@ struct Profile: Identifiable, Codable, Equatable {
     /// Local-calendar days on which the current number focus has been practiced.
     var numberFocusPracticedDays: Set<LocalDay>
 
-    /// Calendar gate: at most one number focus introduction per local day.
+    /// Calendar gate for number introductions. Paired with
+    /// `numbersIntroducedOnLastNewDay` so introduction days can add up to
+    /// `NumberDifficulty.maxNewNumbersPerDay` new numbers.
     var lastNewNumberDay: LocalDay?
+
+    /// How many numbers were formally introduced on `lastNewNumberDay`.
+    /// Ignored when `lastNewNumberDay` is nil or belongs to a prior day.
+    var numbersIntroducedOnLastNewDay: Int
+
+    /// How many numbers were formally introduced on `day` (0 if the stored
+    /// day stamp is missing or belongs to a different local day).
+    func numbersIntroduced(on day: LocalDay) -> Int {
+        lastNewNumberDay == day ? max(0, numbersIntroducedOnLastNewDay) : 0
+    }
+
+    /// Records one formal number introduction against today's quota.
+    mutating func recordNumberIntroduction(on day: LocalDay) {
+        if lastNewNumberDay == day {
+            numbersIntroducedOnLastNewDay = min(
+                NumberDifficulty.maxNewNumbersPerDay,
+                max(0, numbersIntroducedOnLastNewDay) + 1
+            )
+        } else {
+            lastNewNumberDay = day
+            numbersIntroducedOnLastNewDay = 1
+        }
+    }
+
+    /// Marks today's number-introduction quota as fully spent (stuck-focus
+    /// pause, or an explicit full-day consume).
+    mutating func exhaustNumberIntroductionQuota(on day: LocalDay) {
+        lastNewNumberDay = day
+        numbersIntroducedOnLastNewDay = NumberDifficulty.maxNewNumbersPerDay
+    }
 
     /// Focus numbers paused by the stuck-focus escape hatch.
     var pausedFocusNumbers: Set<String>
@@ -524,9 +556,13 @@ struct Profile: Identifiable, Codable, Equatable {
     var dailyPracticeWinnerClaimedDay: LocalDay?
     var dailyPracticeWinnerClaimedMilestone: Int
 
+    /// Absolute per-letter target limit for an introduction-day Letters
+    /// challenge. This matches the Numbers layer: five is 20% of the visible
+    /// 25-correct-answer goal.
+    static let letterDailyTargetAskLimit = 5
+
     /// Per-letter *target ask* counts for the current local day, across all
-    /// sittings. Backs the introduction-day "never more than 10 asks of one
-    /// letter" cap so it holds per calendar day, not just per app sitting.
+    /// ordinary daily sittings.
     var dailyTargetAskDay: LocalDay?
     var dailyTargetAskCounts: [String: Int]
 
@@ -536,6 +572,9 @@ struct Profile: Identifiable, Codable, Equatable {
     var numberDailyPracticeWinnerClaimedMilestone: Int
     var numberCameoExposureDay: LocalDay?
     var numberCameoExposuresToday: Int
+    /// Absolute per-number target limit for an introduction-day Numbers
+    /// challenge. Five is 20% of the visible 25-correct-answer goal.
+    static let numberDailyTargetAskLimit = 5
     var numberDailyTargetAskDay: LocalDay?
     var numberDailyTargetAskCounts: [String: Int]
 
@@ -737,9 +776,12 @@ struct Profile: Identifiable, Codable, Equatable {
     }
 
     /// Per-letter target-ask counts for `day`; empty when the stored counts
-    /// belong to an earlier local day.
+    /// belong to an earlier local day. Legacy over-limit values are clamped.
     func dailyTargetAskCounts(on day: LocalDay = LocalDay.today()) -> [String: Int] {
-        dailyTargetAskDay == day ? dailyTargetAskCounts : [:]
+        guard dailyTargetAskDay == day else { return [:] }
+        return dailyTargetAskCounts.mapValues {
+            min(Self.letterDailyTargetAskLimit, max(0, $0))
+        }
     }
 
     mutating func recordDailyTargetAsk(letter: String, on day: LocalDay = LocalDay.today()) {
@@ -747,7 +789,14 @@ struct Profile: Identifiable, Codable, Equatable {
             dailyTargetAskDay = day
             dailyTargetAskCounts = [:]
         }
-        dailyTargetAskCounts[letter, default: 0] += 1
+        dailyTargetAskCounts = dailyTargetAskCounts.mapValues {
+            min(Self.letterDailyTargetAskLimit, max(0, $0))
+        }
+        let current = dailyTargetAskCounts[letter, default: 0]
+        dailyTargetAskCounts[letter] = min(
+            Self.letterDailyTargetAskLimit,
+            current + 1
+        )
     }
 
     func dailyPracticeWinnerClaimedCount(on day: LocalDay = LocalDay.today()) -> Int {
@@ -801,9 +850,13 @@ struct Profile: Identifiable, Codable, Equatable {
     }
 
     /// Per-number target-ask counts for `day`; empty when the stored counts
-    /// belong to an earlier local day. Parallel to `dailyTargetAskCounts(on:)`.
+    /// belong to an earlier local day. Values are defensively clamped so a
+    /// legacy over-limit profile cannot reintroduce the old repetition bug.
     func numberDailyTargetAskCounts(on day: LocalDay = LocalDay.today()) -> [String: Int] {
-        numberDailyTargetAskDay == day ? numberDailyTargetAskCounts : [:]
+        guard numberDailyTargetAskDay == day else { return [:] }
+        return numberDailyTargetAskCounts.mapValues {
+            min(Self.numberDailyTargetAskLimit, max(0, $0))
+        }
     }
 
     mutating func recordNumberDailyTargetAsk(number: String, on day: LocalDay = LocalDay.today()) {
@@ -811,7 +864,14 @@ struct Profile: Identifiable, Codable, Equatable {
             numberDailyTargetAskDay = day
             numberDailyTargetAskCounts = [:]
         }
-        numberDailyTargetAskCounts[number, default: 0] += 1
+        numberDailyTargetAskCounts = numberDailyTargetAskCounts.mapValues {
+            min(Self.numberDailyTargetAskLimit, max(0, $0))
+        }
+        let current = numberDailyTargetAskCounts[number, default: 0]
+        numberDailyTargetAskCounts[number] = min(
+            Self.numberDailyTargetAskLimit,
+            current + 1
+        )
     }
 
     func activePausedFocusLetters(on day: LocalDay = LocalDay.today()) -> Set<String> {
@@ -863,6 +923,7 @@ struct Profile: Identifiable, Codable, Equatable {
         numberFocusStartedDay: LocalDay? = nil,
         numberFocusPracticedDays: Set<LocalDay> = [],
         lastNewNumberDay: LocalDay? = nil,
+        numbersIntroducedOnLastNewDay: Int = 0,
         pausedFocusNumbers: Set<String> = [],
         pausedFocusNumberDays: [String: LocalDay] = [:],
         lastNumberFocusSelection: FocusSelectionReason? = nil,
@@ -946,6 +1007,7 @@ struct Profile: Identifiable, Codable, Equatable {
         self.numberFocusStartedDay = numberFocusStartedDay
         self.numberFocusPracticedDays = numberFocusPracticedDays
         self.lastNewNumberDay = lastNewNumberDay
+        self.numbersIntroducedOnLastNewDay = numbersIntroducedOnLastNewDay
         self.pausedFocusNumbers = pausedFocusNumbers
         self.pausedFocusNumberDays = pausedFocusNumberDays
         self.lastNumberFocusSelection = lastNumberFocusSelection
@@ -1072,6 +1134,7 @@ struct Profile: Identifiable, Codable, Equatable {
         numberFocusStartedDay = try c.decodeIfPresent(LocalDay.self, forKey: .numberFocusStartedDay)
         numberFocusPracticedDays = try c.decodeIfPresent(Set<LocalDay>.self, forKey: .numberFocusPracticedDays) ?? []
         lastNewNumberDay = try c.decodeIfPresent(LocalDay.self, forKey: .lastNewNumberDay)
+        numbersIntroducedOnLastNewDay = try c.decodeIfPresent(Int.self, forKey: .numbersIntroducedOnLastNewDay) ?? 0
         pausedFocusNumbers = try c.decodeIfPresent(Set<String>.self, forKey: .pausedFocusNumbers) ?? []
         let savedPausedFocusNumberDays = try c.decodeIfPresent([String: LocalDay].self, forKey: .pausedFocusNumberDays)
         pausedFocusNumberDays = savedPausedFocusNumberDays
@@ -1217,11 +1280,11 @@ struct Profile: Identifiable, Codable, Equatable {
         lastFocusSelection = try c.decodeIfPresent(FocusSelectionReason.self, forKey: .lastFocusSelection)
 
         // Phase 0e: legacy payloads carry no round-event history; default
-        // to an empty log. The cap is re-applied on `appendRoundEvent`,
-        // not on decode, so a saved-and-bumped-cap migration would
-        // honestly preserve the (oversized) historic log until the next
-        // append trims it. Today the cap hasn't moved, so this is moot.
-        recentRoundEvents = try c.decodeIfPresent([RoundEvent].self, forKey: .recentRoundEvents) ?? []
+        // to an empty log. Decode lossily so one future RoundEvent shape
+        // (unknown required enum, etc.) cannot fail the whole Profile —
+        // that failure mode emptied kids' progress when sideloading an
+        // older build over numbers-era data.
+        recentRoundEvents = try c.decodeLossyArray(RoundEvent.self, forKey: .recentRoundEvents)
         parentNote = try c.decodeIfPresent(String.self, forKey: .parentNote)
 
         // Migration: profiles saved before this field existed get seeded from
@@ -1303,6 +1366,7 @@ struct Profile: Identifiable, Codable, Equatable {
         // Canonical (LocalDay-typed) keys.
         case focusStartedDay, focusPracticedDays
         case numberFocusStartedDay, numberFocusPracticedDays, lastNewNumberDay
+        case numbersIntroducedOnLastNewDay
         case pausedFocusNumbers, pausedFocusNumberDays, lastNumberFocusSelection
         case syllablesUnlockedAt, wordsUnlockedAt
         case lastNewLetterDay, cameoExposureDay, cameoExposuresToday
@@ -1371,6 +1435,7 @@ struct Profile: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(numberFocusStartedDay, forKey: .numberFocusStartedDay)
         try c.encode(numberFocusPracticedDays, forKey: .numberFocusPracticedDays)
         try c.encodeIfPresent(lastNewNumberDay, forKey: .lastNewNumberDay)
+        try c.encode(numbersIntroducedOnLastNewDay, forKey: .numbersIntroducedOnLastNewDay)
         try c.encode(pausedFocusNumbers, forKey: .pausedFocusNumbers)
         try c.encode(pausedFocusNumberDays, forKey: .pausedFocusNumberDays)
         try c.encodeIfPresent(lastNumberFocusSelection, forKey: .lastNumberFocusSelection)

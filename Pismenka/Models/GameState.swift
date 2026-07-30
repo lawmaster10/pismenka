@@ -489,42 +489,45 @@ final class AdaptiveGameState: ObservableObject {
     private let recentTargetMemoryLimit = 3
     private var strongAuditRoundsScheduled: Int = 0
 
-    /// Hard ceiling: on introduction (25-answer) days, no letter may be the
-    /// *target* more than this many times in one session — including rescue
-    /// retries. The only escape is a sparse profile with no other eligible
-    /// letter still under the cap.
-    private static let hardMaxTargetsPerLetterPerSession = 10
+    private var hardMaxTargetsPerUnit: Int {
+        plan.primaryLayer == .numbers
+            ? Profile.numberDailyTargetAskLimit
+            : Profile.letterDailyTargetAskLimit
+    }
 
     /// How often each letter has already been the target this session.
     private var sessionTargetCounts: [String: Int] = [:]
 
     /// Soft ceiling for how often the drill focus/spotlight may be the *target*
-    /// in one daily session. On introduction days this matches the hard
-    /// per-letter cap (10). Elsewhere ~40% of the goal.
+    /// in one daily session. On introduction days this matches the shared
+    /// five-ask hard cap. Elsewhere ~40% of the goal.
     private var maxFocusTargetsPerSession: Int {
         if plan.dailyPracticeKind == .introduction {
-            return Self.hardMaxTargetsPerLetterPerSession
+            return hardMaxTargetsPerUnit
         }
         return max(3, Int(ceil(Double(max(1, plan.dailyGoalTarget)) * 0.4)))
     }
 
-    /// Introduction days enforce the hard per-letter target cap.
+    /// Ordinary introduction days enforce a hard target cap. Extra Practice is
+    /// intentionally repetitive and isolated from the daily fairness ledger.
     private var enforcesPerLetterTargetCap: Bool {
-        plan.dailyPracticeKind == .introduction
+        guard plan.dailyPracticeKind == .introduction,
+              case .adaptiveDaily = plan.mode else {
+            return false
+        }
+        return plan.primaryLayer == .letters || plan.primaryLayer == .numbers
     }
 
     private func letterUnderTargetCap(_ letter: String) -> Bool {
         guard enforcesPerLetterTargetCap else { return true }
-        return sessionTargetCounts[letter, default: 0] < Self.hardMaxTargetsPerLetterPerSession
+        return sessionTargetCounts[letter, default: 0] < hardMaxTargetsPerUnit
     }
 
-    /// Prefer candidates still under the hard session cap. If every candidate
-    /// is already at the cap (sparse early profiles), return the original list
-    /// so play can continue.
+    /// Return only candidates still under the hard cap. Selection must fail
+    /// closed when none remain; final assignment gates provide the same check.
     private func preferringUnderTargetCap(_ candidates: [String]) -> [String] {
         guard enforcesPerLetterTargetCap else { return candidates }
-        let under = candidates.filter(letterUnderTargetCap)
-        return under.isEmpty ? candidates : under
+        return candidates.filter(letterUnderTargetCap)
     }
 
     private func preferAskableTarget(_ candidates: [String]) -> String? {
@@ -933,6 +936,36 @@ final class AdaptiveGameState: ObservableObject {
         return plan.dailySpotlightLetter ?? profile.currentFocusNumber
     }
 
+    /// Rehydrates the final target window from the persisted round log so a
+    /// fresh same-day sitting cannot repeat the target that ended the previous
+    /// sitting. Extra Practice is excluded because it has its own intentionally
+    /// repetitive contract and no daily-fairness accounting.
+    private static func recentDailyTargets(
+        in profile: Profile,
+        layer: LearningLayer,
+        on day: LocalDay,
+        limit: Int
+    ) -> [String] {
+        let targets = profile.recentRoundEvents.compactMap { event -> String? in
+            guard LocalDay.from(event.date) == day,
+                  event.intent != .extraPractice,
+                  let target = FocusTarget(storageKey: event.target) else {
+                return nil
+            }
+            switch (layer, event.unitKind, target) {
+            case (.numbers, .number, .number(let number))
+                where NumberDifficulty.isEligibleTarget(number):
+                return number
+            case (.letters, .letter, .letter(let letter))
+                where LetterDifficulty.isEligibleTarget(letter, language: profile.language):
+                return letter
+            default:
+                return nil
+            }
+        }
+        return Array(targets.suffix(limit))
+    }
+
     // MARK: Init
 
     init(
@@ -986,13 +1019,21 @@ final class AdaptiveGameState: ObservableObject {
             ? self.sessionPlayableWords
             : []
         self.sessionCorrectPositionCounts = Array(repeating: 0, count: optionsPerRound)
-        // Seed the per-letter target counts from today's persisted asks so the
-        // introduction-day hard cap ("never more than 10 asks of one letter")
-        // holds across multiple sittings on the same local day, not just
-        // within one app sitting.
+        // Seed target counts and recency from today's persisted history so
+        // both the hard cap and the no-adjacent-repeat rule survive a fresh
+        // same-day sitting.
         self.sessionTargetCounts = plan.primaryLayer == .numbers
             ? profile.numberDailyTargetAskCounts(on: LocalDay.today())
             : profile.dailyTargetAskCounts(on: LocalDay.today())
+        if plan.primaryLayer == .numbers || plan.primaryLayer == .letters {
+            self.recentTargetLetters = Self.recentDailyTargets(
+                in: profile,
+                layer: plan.primaryLayer,
+                on: LocalDay.today(),
+                limit: recentTargetMemoryLimit
+            )
+            self.previousTarget = recentTargetLetters.last
+        }
         if let restoredSnapshot,
            restoredSnapshot.profileId == profile.id,
            restoredSnapshot.plan == plan {
@@ -1100,6 +1141,7 @@ final class AdaptiveGameState: ObservableObject {
             sessionEnded: sessionEnded,
             didLevelUpThisSession: didLevelUpThisSession,
             previousTarget: previousTarget,
+            recentTargetLetters: recentTargetLetters,
             practiceProgress: practiceProgress,
             totalCorrectThisSession: totalCorrectThisSession,
             warmupCorrectCount: warmupCorrectCount,
@@ -1172,7 +1214,10 @@ final class AdaptiveGameState: ObservableObject {
             sessionEnded = snapshot.sessionEnded
         }
         didLevelUpThisSession = snapshot.didLevelUpThisSession
-        previousTarget = snapshot.previousTarget
+        if let restoredRecentTargets = snapshot.recentTargetLetters {
+            recentTargetLetters = Array(restoredRecentTargets.suffix(recentTargetMemoryLimit))
+        }
+        previousTarget = snapshot.previousTarget ?? recentTargetLetters.last
         practiceProgress = snapshot.practiceProgress
         totalCorrectThisSession = snapshot.totalCorrectThisSession
         warmupCorrectCount = snapshot.warmupCorrectCount
@@ -1236,7 +1281,18 @@ final class AdaptiveGameState: ObservableObject {
         // additionally include an in-flight, not-yet-answered round. Per-letter
         // max is the correct union of the two (checkpoint asks are a subset of
         // the same day's asks plus at most that one in-flight round).
-        let restoredCounts = snapshot.sessionTargetCounts ?? [:]
+        let restoredCounts: [String: Int]
+        if plan.primaryLayer == .numbers {
+            restoredCounts = (snapshot.sessionTargetCounts ?? [:]).mapValues {
+                min(Profile.numberDailyTargetAskLimit, max(0, $0))
+            }
+        } else if plan.primaryLayer == .letters {
+            restoredCounts = (snapshot.sessionTargetCounts ?? [:]).mapValues {
+                min(Profile.letterDailyTargetAskLimit, max(0, $0))
+            }
+        } else {
+            restoredCounts = snapshot.sessionTargetCounts ?? [:]
+        }
         sessionTargetCounts.merge(restoredCounts) { max($0, $1) }
     }
 
@@ -1261,7 +1317,9 @@ final class AdaptiveGameState: ObservableObject {
         if case .extraPractice(let letter) = plan.mode {
             phase = .plainReview
             updateTeachingContext(profile: profile)
-            previousTarget = targetLetter
+            if !targetLetter.isEmpty {
+                previousTarget = targetLetter
+            }
             currentRoundPhaseOverride = nil
             currentRoundIsRescue = false
             currentRescueDifficulty = nil
@@ -1301,7 +1359,9 @@ final class AdaptiveGameState: ObservableObject {
         }
 
         updateTeachingContext(profile: profile)
-        previousTarget = targetLetter
+        if !targetLetter.isEmpty {
+            previousTarget = targetLetter
+        }
         currentRoundPhaseOverride = nil
 
         // Phase 1b: per-round signal capture resets on every round build.
@@ -1327,7 +1387,7 @@ final class AdaptiveGameState: ObservableObject {
             prioritizeRescueQueueForGovernor()
         }
 
-        if let dueRescue = dequeueDueRescue() {
+        if let dueRescue = dequeueDueRescue(avoiding: previousTarget) {
             currentRoundIsRescue = true
             currentRescueDifficulty = dueRescue.difficulty
             currentRoundPhaseOverride = .rescue
@@ -1398,6 +1458,7 @@ final class AdaptiveGameState: ObservableObject {
             }
         }
 
+        guard sessionEnded == nil else { return }
         currentRoundPlanReason = makeRoundPlanReason(profile: profile)
         rememberTargetLetter()
         advanceRescueQueue()
@@ -1414,7 +1475,9 @@ final class AdaptiveGameState: ObservableObject {
             phase = .plainReview
             teachingMode = .normal
             effectiveScaffoldingLevel = 0
-            previousTarget = targetLetter
+            if !targetLetter.isEmpty {
+                previousTarget = targetLetter
+            }
             currentRoundPhaseOverride = nil
             currentRoundIsRescue = false
             currentRescueDifficulty = nil
@@ -1444,7 +1507,9 @@ final class AdaptiveGameState: ObservableObject {
         effectiveScaffoldingLevel = teachingMode == .scaffolded
             ? 3
             : max(0, plan.focusScaffoldingLevel)
-        previousTarget = targetLetter
+        if !targetLetter.isEmpty {
+            previousTarget = targetLetter
+        }
         currentRoundPhaseOverride = nil
         roundStartedAt = nil
         roundReplayCount = 0
@@ -1458,7 +1523,7 @@ final class AdaptiveGameState: ObservableObject {
             prioritizeRescueQueueForGovernor()
         }
 
-        if let dueRescue = dequeueDueRescue() {
+        if let dueRescue = dequeueDueRescue(avoiding: previousTarget) {
             currentRoundIsRescue = true
             currentRescueDifficulty = dueRescue.difficulty
             currentRoundPhaseOverride = .rescue
@@ -1486,6 +1551,7 @@ final class AdaptiveGameState: ObservableObject {
             }
         }
 
+        guard sessionEnded == nil else { return }
         currentRoundPlanReason = makeRoundPlanReason(profile: profile)
         rememberTargetLetter()
         advanceRescueQueue()
@@ -1515,6 +1581,73 @@ final class AdaptiveGameState: ObservableObject {
             ?? eligible.first(where: { !recent.contains($0) })
             ?? eligible.first(where: { $0 != previousTarget })
             ?? eligible.first
+    }
+
+    /// Strict candidate boundary for an ordinary introduction-day Numbers
+    /// challenge. Unlike the legacy generic helper, this never fails open and
+    /// never returns the immediately previous target. If the introduced pool
+    /// is exhausted, selection returns nil and the sitting ends safely.
+    private func preferFairDailyNumberTarget(_ candidates: [String]) -> String? {
+        let eligible = uniqueEligibleNumberTargets(candidates)
+            .filter(letterUnderTargetCap)
+            .filter { $0 != previousTarget }
+        guard !eligible.isEmpty else { return nil }
+        let recent = Set(recentTargetLetters)
+        return eligible.first(where: { !recent.contains($0) }) ?? eligible.first
+    }
+
+    /// Selects from the scheduler's preferred numbers while keeping the full
+    /// introduced pool available as a fairness fallback. Applying the target
+    /// cap before the recency sweep is important: a one-item "needs work" pool
+    /// must not keep returning that item after it reaches the daily cap, or on
+    /// consecutive rounds, when other introduced numbers are playable.
+    private func preferBalancedNumberTarget(
+        _ preferred: [String],
+        fallback: [String]
+    ) -> String? {
+        let allCandidates = uniqueEligibleNumberTargets(preferred + fallback)
+        if enforcesPerLetterTargetCap {
+            return preferFairDailyNumberTarget(allCandidates)
+        }
+        return preferNotRecentlyTargetedNumber(
+            preferringUnderTargetCap(allCandidates)
+        )
+    }
+
+    /// Final assignment gate shared by warm-up, focus, review, and rescue.
+    /// This is deliberately redundant with the schedulers: no branch may
+    /// assign an over-cap or adjacent duplicate number even if a future target
+    /// heuristic forgets to apply fairness itself.
+    private func finalizeNumberTarget(
+        _ candidate: String?,
+        introducedPool: [String],
+        isRescue: Bool
+    ) -> String? {
+        guard enforcesPerLetterTargetCap else { return candidate }
+
+        let legal = uniqueEligibleNumberTargets(introducedPool)
+            .filter(letterUnderTargetCap)
+            .filter { $0 != previousTarget }
+        guard !legal.isEmpty else { return nil }
+
+        guard let candidate, legal.contains(candidate) else {
+            return preferFairDailyNumberTarget(legal)
+        }
+        guard !isRescue else { return candidate }
+
+        let recent = Set(recentTargetLetters)
+        if recent.contains(candidate),
+           let fresher = legal.first(where: { !recent.contains($0) }) {
+            return fresher
+        }
+        return candidate
+    }
+
+    private func endSessionForExhaustedFairnessPool() {
+        targetLetter = ""
+        displayedLetters = []
+        currentRound = nil
+        sessionEnded = .tiredSignal
     }
 
     /// Introduced numbers the child hasn't yet proven, ordered by scheduler
@@ -1590,17 +1723,20 @@ final class AdaptiveGameState: ObservableObject {
     ) {
         let introducedPool = NumberDifficulty.playablePool(introduced: profile.introducedNumbers)
         let focus = activeNumberDrillFocus(for: profile)
+        let dailyTargetPool = uniqueEligibleNumberTargets(
+            introducedPool + (focus.map { [$0] } ?? [])
+        )
         let calibrationPool = NumberDifficulty.calibrationPool()
 
         var assessmentBucket: WeeklyAssessmentBucket?
-        let target: String
+        let selectedTarget: String?
         if let forcedTarget, NumberDifficulty.isEligibleTarget(forcedTarget) {
-            target = forcedTarget
+            selectedTarget = forcedTarget
         } else if warmup {
             let byPriority = profile.numbersByReviewPriority
-            let pool = preferringUnderTargetCap(byPriority.isEmpty ? introducedPool : byPriority)
-            target = preferNotRecentlyTargetedNumber(pool)
-                ?? pool.first
+            let pool = byPriority.isEmpty ? introducedPool : byPriority
+            selectedTarget = preferBalancedNumberTarget(pool, fallback: introducedPool)
+                ?? preferringUnderTargetCap(introducedPool).first
                 ?? focus
                 ?? calibrationPool[0]
         } else if phase == .drill, let focus {
@@ -1616,26 +1752,34 @@ final class AdaptiveGameState: ObservableObject {
                 && focusBudgetOpen
                 && Double.random(in: 0..<1) < focusTargetChance()
             if mustForceFocus || (wantFocus && !(focusWasJustAsked && !fallbackAlternatives.isEmpty)) {
-                target = focus
+                selectedTarget = focus
             } else {
                 let candidates = alternatives.isEmpty ? fallbackAlternatives : alternatives
-                target = preferNotRecentlyTargetedNumber(preferringUnderTargetCap(candidates))
+                selectedTarget = preferBalancedNumberTarget(candidates, fallback: fallbackAlternatives)
                     ?? (focusAvailable ? focus : candidates.first ?? focus)
             }
         } else if plan.dailyPracticeKind == .reviewTest,
                   let assessmentTarget = chooseWeeklyNumberAssessmentTarget(profile: profile) {
             currentPlainReviewIntentOverride = .weeklyAssessment
             assessmentBucket = profile.activeWeeklyNumberAssessment?.result(for: assessmentTarget).bucket
-            target = assessmentTarget
+            selectedTarget = assessmentTarget
         } else {
             if plan.dailyPracticeKind == .reviewTest {
                 currentPlainReviewIntentOverride = .staleReview
             }
             let needsWork = numbersNeedingWork(profile: profile, excluding: nil)
             let pool = needsWork.isEmpty ? uniqueEligibleNumberTargets(introducedPool) : needsWork
-            target = preferNotRecentlyTargetedNumber(preferringUnderTargetCap(pool))
-                ?? pool.first
+            selectedTarget = preferBalancedNumberTarget(pool, fallback: introducedPool)
+                ?? preferringUnderTargetCap(introducedPool).first
                 ?? calibrationPool[0]
+        }
+        guard let target = finalizeNumberTarget(
+            selectedTarget,
+            introducedPool: dailyTargetPool,
+            isRescue: rescue != nil
+        ) else {
+            endSessionForExhaustedFairnessPool()
+            return
         }
         targetLetter = target
 
@@ -1867,15 +2011,21 @@ final class AdaptiveGameState: ObservableObject {
     /// so an immediate-easy enqueued in the previous round always
     /// fires before any older delayed-mid that has aged into the
     /// due-window during the same setup. Items already at the hard
-    /// target cap are dropped so rescue cannot push a letter over 10.
-    private func dequeueDueRescue() -> RescueItem? {
-        while let idx = rescueQueue.firstIndex(where: { $0.dueAfterRounds <= 0 }) {
-            let item = rescueQueue.remove(at: idx)
-            if letterUnderTargetCap(item.letterKey) {
-                return item
-            }
+    /// target cap are dropped so rescue cannot push a target over its limit.
+    /// `avoiding` keeps even an already-due rescue from chaining the same
+    /// target; it remains queued and becomes eligible after a different round.
+    private func dequeueDueRescue(avoiding: String? = nil) -> RescueItem? {
+        while let idx = rescueQueue.firstIndex(where: {
+            $0.dueAfterRounds <= 0 && !letterUnderTargetCap($0.letterKey)
+        }) {
+            rescueQueue.remove(at: idx)
         }
-        return nil
+        guard let idx = rescueQueue.firstIndex(where: {
+            $0.dueAfterRounds <= 0 && $0.letterKey != avoiding
+        }) else {
+            return nil
+        }
+        return rescueQueue.remove(at: idx)
     }
 
     /// Decrement every remaining item's `dueAfterRounds` by one,
@@ -1899,12 +2049,16 @@ final class AdaptiveGameState: ObservableObject {
     }
 
     /// When the child is struggling, don't make them wait through delayed
-    /// rescue timers. This implements the "rescue queue preferentially
-    /// drained" part of the governor: all pending rescues become due now,
-    /// and the normal FIFO dequeue still decides which one fires first.
+    /// rescue timers. Numbers retain one intervening-round delay so governor
+    /// relief can never create an immediate duplicate; the dequeue guard is a
+    /// second line of defense for restored legacy queues already due at zero.
     private func prioritizeRescueQueueForGovernor() {
+        let minimumDelay = plan.primaryLayer == .numbers ? 1 : 0
         for i in rescueQueue.indices {
-            rescueQueue[i].dueAfterRounds = 0
+            rescueQueue[i].dueAfterRounds = min(
+                rescueQueue[i].dueAfterRounds,
+                minimumDelay
+            )
         }
     }
 
@@ -2795,11 +2949,82 @@ final class AdaptiveGameState: ObservableObject {
         sessionTargetCounts[targetLetter, default: 0] += 1
     }
 
+    private func dailyLetterTargetPool(profile: Profile) -> [String] {
+        var planned = [
+            plan.dailySpotlightLetter,
+            plan.focusLetter,
+            profile.currentFocusLetter
+        ].compactMap { $0 }
+        if case .letter(let focus)? = plan.focusTarget {
+            planned.append(focus)
+        }
+        // Legacy profiles may carry real target-attempt evidence from before
+        // `introducedLetters` was persisted reliably. Those are safe,
+        // previously taught targets—not unseen alphabet fallbacks.
+        let historicallyTargeted = profile.letterStats.compactMap {
+            $0.value.targetAttempts > 0 ? $0.key : nil
+        }
+        return uniqueEligibleTargets(
+            planned
+                + Array(profile.introducedLetters).sorted()
+                + Array(profile.knownLetters).sorted()
+                + historicallyTargeted.sorted()
+        )
+    }
+
+    private func finalizedDailyLetterTarget(
+        _ candidate: String,
+        fallbackCandidates: [String],
+        profile: Profile,
+        preserveCandidateIfLegal: Bool
+    ) -> String? {
+        let dailyPool = dailyLetterTargetPool(profile: profile)
+        let allowed = Set(dailyPool)
+        let legal = uniqueEligibleTargets(
+            [candidate] + fallbackCandidates + dailyPool
+        ).filter {
+            allowed.contains($0)
+                && letterUnderTargetCap($0)
+                && $0 != previousTarget
+        }
+        guard !legal.isEmpty else { return nil }
+
+        if preserveCandidateIfLegal, legal.contains(candidate) {
+            return candidate
+        }
+        let recent = Set(recentTargetLetters)
+        if legal.contains(candidate), !recent.contains(candidate) {
+            return candidate
+        }
+        return legal.first(where: { !recent.contains($0) })
+            ?? (legal.contains(candidate) ? candidate : legal.first)
+    }
+
+    /// Final assignment boundary for every letter round builder. Ordinary
+    /// daily challenges cannot bypass the cap or repeat the previous target;
+    /// targeted rescue/contrast rounds may ignore the wider recency window,
+    /// but never those two hard invariants.
+    @discardableResult
     private func setTargetLetter(
         _ candidate: String,
         profile: Profile,
-        fallbackCandidates: [String] = []
-    ) {
+        fallbackCandidates: [String] = [],
+        preserveCandidateIfLegal: Bool = false
+    ) -> Bool {
+        if plan.primaryLayer == .letters, enforcesPerLetterTargetCap {
+            guard let target = finalizedDailyLetterTarget(
+                candidate,
+                fallbackCandidates: fallbackCandidates,
+                profile: profile,
+                preserveCandidateIfLegal: preserveCandidateIfLegal
+            ) else {
+                endSessionForExhaustedFairnessPool()
+                return false
+            }
+            targetLetter = target
+            return true
+        }
+
         let fallback = fallbackCandidates
             + profile.lettersByConfidence
             + LetterDifficulty.calibrationPool(
@@ -2808,14 +3033,12 @@ final class AdaptiveGameState: ObservableObject {
             )
             + language.letters
         let pool = [candidate] + fallback
-        // Prefer any eligible letter still under the hard session cap; only
-        // fall back to an over-cap letter when the profile is too sparse to
-        // have alternatives (e.g. first days with one or two letters).
         targetLetter = pool.first {
             LetterDifficulty.isEligibleTarget($0, language: language) && letterUnderTargetCap($0)
         } ?? pool.first {
             LetterDifficulty.isEligibleTarget($0, language: language)
         } ?? "A"
+        return true
     }
 
     private func buildWarmupRound(profile: Profile) {
@@ -2852,13 +3075,21 @@ final class AdaptiveGameState: ObservableObject {
         // the child still sees variety. `max(3, count/2)` keeps the pool
         // usable when the child only knows a handful of letters.
         let askablePriority = preferringUnderTargetCap(priorityOrder)
+        guard !askablePriority.isEmpty else {
+            buildPlainReviewRound(profile: profile)
+            return
+        }
         let topHalf = Array(askablePriority.prefix(max(3, askablePriority.count / 2)))
         let pool = topHalf.filter { !seenWarmupLetters.contains($0) }
         let candidate = (pool.randomElement() ?? topHalf.randomElement() ?? askablePriority.first!)
         let targetCandidate = (candidate == previousTarget && topHalf.count > 1)
             ? (topHalf.first(where: { $0 != previousTarget }) ?? candidate)
             : candidate
-        setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: askablePriority)
+        guard setTargetLetter(
+            targetCandidate,
+            profile: profile,
+            fallbackCandidates: askablePriority
+        ) else { return }
         let target = targetLetter
         let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
 
@@ -2903,7 +3134,11 @@ final class AdaptiveGameState: ObservableObject {
         let targetCandidate: String = mustForceFocus
             ? focus
             : chooseDrillTarget(focus: focus, profile: profile)
-        setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: confidence + [focus])
+        guard setTargetLetter(
+            targetCandidate,
+            profile: profile,
+            fallbackCandidates: confidence + [focus]
+        ) else { return }
         let target = targetLetter
         let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
 
@@ -2986,7 +3221,11 @@ final class AdaptiveGameState: ObservableObject {
                 nameLetter: profile.firstNameLetterKey
             )
             let targetCandidate = pool.randomElement() ?? "A"
-            setTargetLetter(targetCandidate, profile: profile, fallbackCandidates: pool)
+            guard setTargetLetter(
+                targetCandidate,
+                profile: profile,
+                fallbackCandidates: pool
+            ) else { return }
             let target = targetLetter
             let optionCount = resolvedLetterOptionCount(for: target, profile: profile, forceFour: true)
             let distractors = Array(pool.filter { $0 != target }.shuffled().prefix(optionCount - 1))
@@ -3009,7 +3248,11 @@ final class AdaptiveGameState: ObservableObject {
         if reviewCandidates.count > 1, target == previousTarget {
             target = reviewCandidates.first(where: { $0 != previousTarget }) ?? target
         }
-        setTargetLetter(target, profile: profile, fallbackCandidates: reviewCandidates)
+        guard setTargetLetter(
+            target,
+            profile: profile,
+            fallbackCandidates: reviewCandidates
+        ) else { return }
         target = targetLetter
         let optionCount = resolvedLetterOptionCount(
             for: target,
@@ -3196,7 +3439,11 @@ final class AdaptiveGameState: ObservableObject {
         if priorityOrder.count > 1, target == previousTarget {
             target = priorityOrder.first(where: { $0 != previousTarget }) ?? target
         }
-        setTargetLetter(target, profile: profile, fallbackCandidates: priorityOrder)
+        guard setTargetLetter(
+            target,
+            profile: profile,
+            fallbackCandidates: priorityOrder
+        ) else { return }
         target = targetLetter
         let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
         let policy = levelAdjustedPolicy(.intentionallyPractice)
@@ -3222,7 +3469,7 @@ final class AdaptiveGameState: ObservableObject {
     }
 
     private func buildExtraPracticeRound(profile: Profile, target: String) {
-        setTargetLetter(target, profile: profile)
+        guard setTargetLetter(target, profile: profile) else { return }
         let target = targetLetter
         let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
         let basePolicy: LetterDifficulty.ConfusionPolicy = profile.knownLetters.contains(target) ? .intentionallyPractice : .avoid
@@ -3439,7 +3686,13 @@ final class AdaptiveGameState: ObservableObject {
     }
 
     private func buildContrastRound(profile: Profile) {
-        guard let pair = eligibleContrastPairs(profile: profile).first else {
+        let allowed = Set(dailyLetterTargetPool(profile: profile))
+        guard let pair = eligibleContrastPairs(profile: profile).first(where: {
+            !enforcesPerLetterTargetCap
+                || (allowed.contains($0.target)
+                    && letterUnderTargetCap($0.target)
+                    && $0.target != previousTarget)
+        }) else {
             buildPlainReviewRound(profile: profile)
             currentRoundIntent = governedIntent(.staleReview)
             return
@@ -3448,7 +3701,12 @@ final class AdaptiveGameState: ObservableObject {
         effectiveScaffoldingLevel = 0
         currentRoundPhaseOverride = .contrast
         currentRoundIntent = .contrastPair
-        setTargetLetter(pair.target, profile: profile, fallbackCandidates: [pair.target])
+        guard setTargetLetter(
+            pair.target,
+            profile: profile,
+            fallbackCandidates: [pair.target],
+            preserveCandidateIfLegal: true
+        ) else { return }
         let target = targetLetter
         let optionCount = resolvedLetterOptionCount(for: target, profile: profile)
 
@@ -3486,7 +3744,11 @@ final class AdaptiveGameState: ObservableObject {
     ///   we're not yet asking them to discriminate against
     ///   easily-confusable shapes.
     private func buildRescueRound(profile: Profile, item: RescueItem) {
-        setTargetLetter(item.letterKey, profile: profile)
+        guard setTargetLetter(
+            item.letterKey,
+            profile: profile,
+            preserveCandidateIfLegal: true
+        ) else { return }
         let target = targetLetter
         let optionCount = resolvedLetterOptionCount(for: target, profile: profile, forceFour: true)
         let distractors: [String]
@@ -3661,7 +3923,7 @@ final class AdaptiveGameState: ObservableObject {
     }
 
     /// 25-answer introduction day mix:
-    /// 1. Spotlight / focus (prioritized, hard-capped at 10, no chaining)
+    /// 1. Spotlight / focus (prioritized, hard-capped at 5, no chaining)
     /// 2. Contrast partner of the previous target when an active confusion
     ///    pair exists (adjacent-round discrimination practice)
     /// 3. Introduced letters that are weak (low success), under-practiced

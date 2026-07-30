@@ -136,6 +136,9 @@ struct GameEngineSnapshot: Codable, Equatable {
     var didLevelUpThisSession: Bool
 
     var previousTarget: String?
+    /// Rolling target history used by the anti-repeat selector. Optional so
+    /// checkpoints created before the strict numbers-fairness fix still decode.
+    var recentTargetLetters: [String]? = nil
     var practiceProgress: Double
     var totalCorrectThisSession: Int
     var warmupCorrectCount: Int
@@ -190,9 +193,9 @@ struct GameEngineSnapshot: Codable, Equatable {
     var recentCorrectPositions: [Int]
     var recentFocusCorrectPositions: [Int]
     var sessionCorrectPositionCounts: [Int]
-    /// Per-letter target ask counts for the current session. Used to enforce
-    /// the hard "never more than 10 asks of one letter" rule on introduction
-    /// days. Optional for back-compat with older checkpoints.
+    /// Per-target ask counts for the current local day. Used to enforce the
+    /// layer-specific introduction-day cap across restores and sittings.
+    /// Optional for back-compat with older checkpoints.
     var sessionTargetCounts: [String: Int]? = nil
     var advanceToNextRoundOnRestore: Bool
 }

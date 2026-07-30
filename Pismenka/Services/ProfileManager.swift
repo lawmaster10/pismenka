@@ -15,6 +15,11 @@ class ProfileManager: ObservableObject {
     @Published var profiles: [Profile] = []
     @Published private(set) var lastResetSnapshot: Profile?
     @Published private(set) var persistenceErrorMessage: String?
+    /// Set when the on-disk profile blob cannot be decoded and no last-good
+    /// backup is available. Cloud uploads must stay blocked until a restore
+    /// or import replaces the empty/untrusted store — otherwise an older
+    /// sideloaded build can wipe Firestore with an empty payload.
+    @Published private(set) var localStoreUntrusted = false
 
     /// Storage key for the v2 schema (per-letter mastery, day-streak, focus
     /// letter). The old `pismenka_profiles` key is intentionally left untouched
@@ -76,12 +81,18 @@ class ProfileManager: ObservableObject {
 
     func replaceProfiles(_ newProfiles: [Profile]) {
         profiles = Array(newProfiles.prefix(maxProfiles))
+        localStoreUntrusted = false
         saveProfilesImmediately()
     }
 
     func replaceProfilesFromCloud(_ newProfiles: [Profile]) {
         profiles = Array(newProfiles.prefix(maxProfiles))
+        localStoreUntrusted = false
         saveProfilesImmediately()
+    }
+
+    func clearLocalStoreUntrusted() {
+        localStoreUntrusted = false
     }
 
     /// Wipes all gameplay state for a profile (recalibration on next entry)
@@ -311,6 +322,7 @@ class ProfileManager: ObservableObject {
         profiles[index].numberFocusStartedDay = nil
         profiles[index].numberFocusPracticedDays = []
         profiles[index].lastNewNumberDay = nil
+        profiles[index].numbersIntroducedOnLastNewDay = 0
         profiles[index].pausedFocusNumbers = []
         profiles[index].pausedFocusNumberDays = [:]
         profiles[index].lastNumberFocusSelection = nil
@@ -379,8 +391,8 @@ class ProfileManager: ObservableObject {
 
     /// Numbers twin of `resetCurrentFocus`: drops the current focus number so
     /// the next numbers session picks a fresh one. Stats are preserved;
-    /// `lastNewNumberDay` is intentionally kept so the one-new-number-per-day
-    /// rule still holds.
+    /// `lastNewNumberDay` / `numbersIntroducedOnLastNewDay` are intentionally
+    /// kept so the daily introduction quota still holds.
     func resetCurrentNumberFocus(profileId: UUID) {
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
         lastResetSnapshot = profiles[index]
@@ -887,7 +899,7 @@ class ProfileManager: ObservableObject {
             clockMovedBackward: clockMovedBackward
         )
 
-        let alreadyIntroducedToday = profile.lastNewNumberDay == today
+        let alreadyIntroducedToday = profile.numbersIntroduced(on: today)
         var introducedNewFocus = false
         var introducedFocusTarget: FocusTarget?
         var dailySpotlightNumber: String?
@@ -904,34 +916,41 @@ class ProfileManager: ObservableObject {
                 profile.numberFocusStartedDay = nil
                 profile.numberFocusPracticedDays = []
                 profile.lastNumberFocusSelection = nil
-                profile.lastNewNumberDay = today
+                profile.exhaustNumberIntroductionQuota(on: today)
                 pausedStuckFocusToday = true
             }
 
-            if dailyPractice.kind == .introduction,
-               !alreadyIntroducedToday,
-               !pausedStuckFocusToday,
-               let next = NumberDifficulty.nextFocusCandidate(
-                   introduced: profile.introducedNumbers,
-                   known: profile.knownNumbers,
-                   blocked: profile.activePausedFocusNumbers(on: today)
-               ) {
-                dailySpotlightNumber = next
-                profile.lastNewNumberDay = today
-                profile.introducedNumbers.insert(next)
-                introducedNewFocus = true
-                introducedFocusTarget = .number(next)
-                profile.weeklyIntroducedNumbers.insert(next)
-                if profile.currentFocusNumber == nil {
-                    profile.currentFocusNumber = next
-                    profile.numberFocusStartedDay = today
-                    profile.numberFocusPracticedDays = [today]
-                    profile.lastNumberFocusSelection = FocusSelectionReason(
-                        selectedKey: next,
-                        date: Date(),
-                        reason: .nextInOrder
-                    )
-                } else {
+            var introducedCountToday = alreadyIntroducedToday
+            if dailyPractice.kind == .introduction, !pausedStuckFocusToday {
+                while introducedCountToday < NumberDifficulty.maxNewNumbersPerDay,
+                      let next = NumberDifficulty.nextFocusCandidate(
+                          introduced: profile.introducedNumbers,
+                          known: profile.knownNumbers,
+                          blocked: profile.activePausedFocusNumbers(on: today)
+                      ) {
+                    if dailySpotlightNumber == nil {
+                        dailySpotlightNumber = next
+                    }
+                    profile.recordNumberIntroduction(on: today)
+                    profile.introducedNumbers.insert(next)
+                    introducedCountToday += 1
+                    introducedNewFocus = true
+                    if introducedFocusTarget == nil {
+                        introducedFocusTarget = .number(next)
+                    }
+                    profile.weeklyIntroducedNumbers.insert(next)
+                    if profile.currentFocusNumber == nil {
+                        profile.currentFocusNumber = next
+                        profile.numberFocusStartedDay = today
+                        profile.numberFocusPracticedDays = [today]
+                        profile.lastNumberFocusSelection = FocusSelectionReason(
+                            selectedKey: next,
+                            date: Date(),
+                            reason: .nextInOrder
+                        )
+                    }
+                }
+                if profile.currentFocusNumber != nil {
                     profile.numberFocusPracticedDays.insert(today)
                 }
             } else if profile.currentFocusNumber != nil {
@@ -1498,12 +1517,13 @@ class ProfileManager: ObservableObject {
             // deliberately do NOT take this branch and so cannot
             // inflate the persisted set.
             profile.introducedLetters.insert(letter)
-            // Every target ask counts toward the per-day exposure cap,
-            // impulse-discounted or not — the child saw the round either
-            // way. New sittings seed the engine's session counts from
-            // this map so the "max 10 asks of one letter" rule holds per
-            // calendar day, not just per app sitting.
-            profile.recordDailyTargetAsk(letter: letter)
+            // The fairness ledger belongs only to ordinary daily Letters
+            // challenges. Extra Practice and calibration do not consume it;
+            // the weekly assessment has its own cohort and round ceiling.
+            if countsTowardDailyPractice,
+               profile.activeWeeklyAssessment == nil {
+                profile.recordDailyTargetAsk(letter: letter)
+            }
         } else {
             stat.recordDistractorExposure()
         }
@@ -1931,7 +1951,14 @@ class ProfileManager: ObservableObject {
                     }
                 }
                 profile.introducedNumbers.insert(number)
-                profile.recordNumberDailyTargetAsk(number: number)
+                // The fairness ledger belongs only to ordinary daily Numbers
+                // challenges. Extra Practice and calibration deliberately do
+                // not consume it; the weekly assessment has its own fixed
+                // cohort/ceiling and likewise does not seed a later daily cap.
+                if countsTowardDailyPractice,
+                   profile.activeWeeklyNumberAssessment == nil {
+                    profile.recordNumberDailyTargetAsk(number: number)
+                }
             } else {
                 stat.recordDistractorExposure()
             }
@@ -1976,9 +2003,11 @@ class ProfileManager: ObservableObject {
                     profile.currentFocusNumber = nil
                     profile.numberFocusStartedDay = nil
                     profile.numberFocusPracticedDays = []
-                    // Graduation consumes today's number-introduction quota,
-                    // matching the letters rule.
-                    profile.lastNewNumberDay = LocalDay.today()
+                    // Graduation consumes one slot of today's number-introduction
+                    // quota (of `maxNewNumbersPerDay`), matching the letters idea
+                    // that a mid-session graduation shouldn't immediately unlock
+                    // a full replacement batch.
+                    profile.recordNumberIntroduction(on: LocalDay.today())
                 }
 
                 let afterBand = NumberInstructionalBand.from(
@@ -2285,18 +2314,21 @@ class ProfileManager: ObservableObject {
     private func loadProfiles() {
         guard let data = defaults.data(forKey: storageKey) else {
             profiles = []
+            localStoreUntrusted = false
             return
         }
         do {
             profiles = try JSONDecoder().decode([Profile].self, from: data)
             defaults.set(data, forKey: lastGoodStorageKey)
             persistenceErrorMessage = nil
+            localStoreUntrusted = false
         } catch {
             defaults.set(data, forKey: recoveryStorageKey)
             if let backupData = defaults.data(forKey: lastGoodStorageKey),
                let recoveredProfiles = try? JSONDecoder().decode([Profile].self, from: backupData) {
                 profiles = recoveredProfiles
                 defaults.set(backupData, forKey: storageKey)
+                localStoreUntrusted = false
                 persistenceErrorMessage = "Písmenka restored profiles from the last readable backup. The unreadable data was preserved for recovery."
                 print("Restored profiles from last known-good backup after load failure: \(error)")
                 return
@@ -2304,6 +2336,7 @@ class ProfileManager: ObservableObject {
             persistenceErrorMessage = "Písmenka couldn't read saved profiles. The unreadable data was preserved for recovery."
             print("Failed to load profiles: \(error)")
             profiles = []
+            localStoreUntrusted = true
         }
     }
 

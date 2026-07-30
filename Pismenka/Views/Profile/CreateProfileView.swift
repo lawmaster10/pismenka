@@ -259,7 +259,7 @@ struct FirstLaunchOnboardingView: View {
 
     private var shouldShowBackupStatus: Bool {
         switch firebaseBackupService.status {
-        case .offline, .failed, .syncing:
+        case .offline, .failed, .syncing, .protectedExistingBackup, .needsConfirmationToOverwriteNewerApp:
             return true
         case .notConfigured, .signedOut, .synced, .restored, .tooLarge:
             return false
@@ -270,7 +270,7 @@ struct FirstLaunchOnboardingView: View {
         switch firebaseBackupService.status {
         case .failed:
             return .berryInk
-        case .offline:
+        case .offline, .protectedExistingBackup, .needsConfirmationToOverwriteNewerApp:
             return .sun
         default:
             return .slate500
@@ -295,6 +295,10 @@ struct FirstLaunchOnboardingView: View {
             return "You're offline. Check your connection or continue without backup."
         case .failed(let message):
             return message
+        case .protectedExistingBackup:
+            return "Kept your previous cloud backup — restore from Settings if local data looks wrong."
+        case .needsConfirmationToOverwriteNewerApp(let cloudVersion, let localVersion):
+            return "Cloud backup is from Písmenka \(cloudVersion); this device is \(localVersion). Open Settings to confirm before overwriting."
         }
     }
 

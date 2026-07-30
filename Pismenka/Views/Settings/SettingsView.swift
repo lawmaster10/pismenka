@@ -97,7 +97,10 @@ struct SettingsView: View {
                                 onGoogleSignIn: { firebaseBackupService.signInWithGoogle() },
                                 onSignOut: { firebaseBackupService.signOut() },
                                 onBackupNow: { firebaseBackupService.backupNow() },
-                                onRestoreNow: { firebaseBackupService.restoreNow() }
+                                onRestoreNow: { firebaseBackupService.restoreNow() },
+                                onConfirmOverwriteNewerApp: {
+                                    firebaseBackupService.backupNow(confirmAppVersionDowngrade: true)
+                                }
                             )
                             ButtonRow(title: "Copy diagnostic summary", subtitle: "Progress summary for support.", icon: "doc.on.doc") {
                                 UIPasteboard.general.string = diagnosticSummary()
@@ -577,6 +580,10 @@ struct FirebaseBackupStatusRow: View {
     let onSignOut: () -> Void
     let onBackupNow: () -> Void
     let onRestoreNow: () -> Void
+    var onConfirmOverwriteNewerApp: () -> Void = {}
+
+    @State private var showOverwriteNewerAppConfirm = false
+    @State private var pendingOverwriteVersions: (cloud: String, local: String)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -629,7 +636,7 @@ struct FirebaseBackupStatusRow: View {
                     Button("Sign in with Google", action: onGoogleSignIn)
                         .buttonStyle(BrandSecondaryButtonStyle())
                 } else {
-                    Button("Sync now", action: onBackupNow)
+                    Button("Sync now", action: handleSyncNow)
                         .buttonStyle(BrandSecondaryButtonStyle())
                     Button("Restore", action: onRestoreNow)
                         .buttonStyle(BrandSecondaryButtonStyle())
@@ -649,6 +656,44 @@ struct FirebaseBackupStatusRow: View {
                 .stroke(Color.creamDeep.opacity(0.9), lineWidth: 1)
         )
         .shadow(color: Color.ink.opacity(0.05), radius: 10, x: 0, y: 6)
+        .onChange(of: status) { _, newStatus in
+            if case .needsConfirmationToOverwriteNewerApp(let cloud, let local) = newStatus {
+                pendingOverwriteVersions = (cloud, local)
+                showOverwriteNewerAppConfirm = true
+            }
+        }
+        .confirmationDialog(
+            overwriteDialogTitle,
+            isPresented: $showOverwriteNewerAppConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Keep cloud backup", role: .cancel) {}
+            Button("Replace anyway", role: .destructive) {
+                onConfirmOverwriteNewerApp()
+            }
+        } message: {
+            Text(overwriteDialogMessage)
+        }
+    }
+
+    private func handleSyncNow() {
+        if case .needsConfirmationToOverwriteNewerApp(let cloud, let local) = status {
+            pendingOverwriteVersions = (cloud, local)
+            showOverwriteNewerAppConfirm = true
+            return
+        }
+        onBackupNow()
+    }
+
+    private var overwriteDialogTitle: String {
+        "Overwrite newer cloud backup?"
+    }
+
+    private var overwriteDialogMessage: String {
+        let versions = pendingOverwriteVersions
+        let cloud = versions?.cloud ?? "?"
+        let local = versions?.local ?? "?"
+        return "Cloud backup is from Písmenka \(cloud); this device is \(local). Replacing is unusual after installing an older build and can lose progress."
     }
 
     private var iconName: String {
@@ -665,14 +710,14 @@ struct FirebaseBackupStatusRow: View {
             return "arrow.down.circle.fill"
         case .offline:
             return "wifi.slash"
-        case .tooLarge, .failed:
+        case .tooLarge, .failed, .protectedExistingBackup, .needsConfirmationToOverwriteNewerApp:
             return "exclamationmark.icloud"
         }
     }
 
     private var iconColor: Color {
         switch status {
-        case .notConfigured, .failed, .tooLarge, .offline:
+        case .notConfigured, .failed, .tooLarge, .offline, .protectedExistingBackup, .needsConfirmationToOverwriteNewerApp:
             return .sun
         case .syncing:
             return .sky
@@ -701,6 +746,17 @@ struct FirebaseBackupStatusRow: View {
             return "No internet connection. Cloud recovery will retry when you're back online."
         case .failed(let message):
             return message
+        case .protectedExistingBackup(let reason):
+            switch reason {
+            case .schemaDowngrade:
+                return "Kept your previous cloud backup — this app build is too old to replace it safely."
+            case .emptyOverNonEmpty:
+                return "Kept your previous cloud backup — local data looked empty or incomplete."
+            case .localStoreUntrusted:
+                return "Kept your previous cloud backup — local profiles couldn't be read. Tap Restore or import a backup first."
+            }
+        case .needsConfirmationToOverwriteNewerApp(let cloudVersion, let localVersion):
+            return "Cloud backup is from Písmenka \(cloudVersion); this device is \(localVersion). Tap Sync now if you really want to overwrite."
         }
     }
 
@@ -708,7 +764,8 @@ struct FirebaseBackupStatusRow: View {
         switch status {
         case .synced, .restored:
             return true
-        case .notConfigured, .signedOut, .syncing, .tooLarge, .offline, .failed:
+        case .notConfigured, .signedOut, .syncing, .tooLarge, .offline, .failed,
+             .protectedExistingBackup, .needsConfirmationToOverwriteNewerApp:
             return false
         }
     }

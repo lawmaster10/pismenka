@@ -1534,7 +1534,7 @@ final class PismenkaModelTests: XCTestCase {
 
     @MainActor
     func testIntroducedSpotlightDoesNotDominateDailyLetterSession() throws {
-        // Regression: introduction days must hard-cap any letter at 10 target
+        // Regression: introduction days must hard-cap any letter at 5 target
         // asks, prioritize the spotlight without chaining it, fill the rest
         // with weak / under-practiced introduced letters, and only lightly
         // sprinkle strong letters.
@@ -1580,8 +1580,6 @@ final class PismenkaModelTests: XCTestCase {
         var spotlightTargets = 0
         var needsWorkTargets = 0
         var strongTargets = 0
-        var maxConsecutiveSpotlightTargets = 0
-        var currentConsecutiveSpotlightTargets = 0
         var targets: [String] = []
         let needsWorkPool = weakLetters.union(lowAttemptLetters)
 
@@ -1591,13 +1589,7 @@ final class PismenkaModelTests: XCTestCase {
             counts[target, default: 0] += 1
             if target == spotlight {
                 spotlightTargets += 1
-                currentConsecutiveSpotlightTargets += 1
-                maxConsecutiveSpotlightTargets = max(
-                    maxConsecutiveSpotlightTargets,
-                    currentConsecutiveSpotlightTargets
-                )
             } else {
-                currentConsecutiveSpotlightTargets = 0
                 if needsWorkPool.contains(target) {
                     needsWorkTargets += 1
                 } else if strongLetters.contains(target) {
@@ -1611,15 +1603,14 @@ final class PismenkaModelTests: XCTestCase {
         }
 
         XCTAssertGreaterThanOrEqual(spotlightTargets, 1, "Spotlight must still be practiced: \(targets)")
-        XCTAssertLessThanOrEqual(
-            maxConsecutiveSpotlightTargets,
-            2,
-            "Spotlight must not be chained as the target: \(targets)"
+        XCTAssertFalse(
+            zip(targets, targets.dropFirst()).contains { $0.0 == $0.1 },
+            "Daily letter targets must never be chained: \(targets)"
         )
         for (letter, count) in counts {
             XCTAssertLessThanOrEqual(
                 count,
-                10,
+                Profile.letterDailyTargetAskLimit,
                 "Hard cap: \(letter) asked \(count) times in \(targets)"
             )
         }
@@ -1631,7 +1622,7 @@ final class PismenkaModelTests: XCTestCase {
     }
 
     @MainActor
-    func testIntroductionDayHardCapBlocksRescueOverTen() throws {
+    func testIntroductionDayHardCapBlocksRescueOverFive() throws {
         let today = LocalDay.today()
         let yesterday = today.adding(days: -1)
         let knownLetters: Set<String> = [
@@ -1660,10 +1651,12 @@ final class PismenkaModelTests: XCTestCase {
 
         let state = AdaptiveGameState(profile: manager.profiles[0], plan: plan, profileManager: manager)
         var counts: [String: Int] = [:]
+        var targets: [String] = []
 
         // Keep missing until the hard cap must absorb rescue pressure.
         for _ in 0..<40 {
             let target = state.targetLetter
+            targets.append(target)
             counts[target, default: 0] += 1
             let wrong = state.displayedLetters.first { $0 != target } ?? target
             let outcome = state.processAnswer(target == spotlight ? wrong : target)
@@ -1671,15 +1664,26 @@ final class PismenkaModelTests: XCTestCase {
             state.setupNewRound()
         }
 
-        XCTAssertLessThanOrEqual(counts[spotlight, default: 0], 10)
+        XCTAssertLessThanOrEqual(
+            counts[spotlight, default: 0],
+            Profile.letterDailyTargetAskLimit
+        )
+        XCTAssertFalse(
+            zip(targets, targets.dropFirst()).contains { $0.0 == $0.1 },
+            "Rescue/governor path chained a letter target: \(targets)"
+        )
         for (letter, count) in counts {
-            XCTAssertLessThanOrEqual(count, 10, "\(letter) exceeded hard cap in rescue stress run")
+            XCTAssertLessThanOrEqual(
+                count,
+                Profile.letterDailyTargetAskLimit,
+                "\(letter) exceeded hard cap in rescue stress run"
+            )
         }
     }
 
     @MainActor
     func testIntroductionDayTargetCapPersistsAcrossSameDaySittings() throws {
-        // The "never more than 10 asks of one letter" rule must hold per
+        // The "never more than 5 asks of one letter" rule must hold per
         // calendar day, not per app sitting. Simulate an earlier sitting today
         // that already spent the spotlight's full ask budget, then verify a
         // fresh engine refuses to target it again.
@@ -1710,7 +1714,9 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(plan.dailyPracticeKind, .introduction)
 
         manager.profiles[0].dailyTargetAskDay = today
-        manager.profiles[0].dailyTargetAskCounts = [spotlight: 10]
+        manager.profiles[0].dailyTargetAskCounts = [
+            spotlight: Profile.letterDailyTargetAskLimit
+        ]
 
         let state = AdaptiveGameState(profile: manager.profiles[0], plan: plan, profileManager: manager)
         var spotlightTargets = 0
@@ -1728,17 +1734,210 @@ final class PismenkaModelTests: XCTestCase {
         XCTAssertEqual(
             spotlightTargets,
             0,
-            "Spotlight already hit the 10-ask day cap in an earlier sitting"
+            "Spotlight already hit the 5-ask day cap in an earlier sitting"
         )
         XCTAssertGreaterThan(roundsPlayed, 0)
         // Answered target rounds keep accruing into the persisted day counts.
         let persisted = manager.profiles[0].dailyTargetAskCounts(on: today)
-        XCTAssertEqual(persisted[spotlight], 10)
+        XCTAssertEqual(persisted[spotlight], Profile.letterDailyTargetAskLimit)
         XCTAssertGreaterThanOrEqual(
-            persisted.values.reduce(0, +) - 10,
+            persisted.values.reduce(0, +) - Profile.letterDailyTargetAskLimit,
             roundsPlayed - 1,
             "Every answered target ask should persist into the day counts"
         )
+    }
+
+    @MainActor
+    func testLettersFreshSameDaySessionRestoresRecentTargetBoundary() {
+        let introduced = Set(["A", "B", "C", "D", "E", "F", "G", "H"])
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: introduced),
+            hasCompletedCalibration: true,
+            everMasteredLetters: introduced,
+            introducedLetters: introduced
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        manager.recordAnswer(
+            profileId: profile.id,
+            letter: "A",
+            wasCorrect: true,
+            asTarget: true,
+            optionsShown: ["A", "B", "C", "D"],
+            intent: .staleReview,
+            phaseAtAnswer: .plainReview,
+            countsTowardDailyPractice: true
+        )
+        let persisted = manager.profiles[0]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            focusScaffoldingLevel: 0,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction
+        )
+
+        let state = AdaptiveGameState(
+            profile: persisted,
+            plan: plan,
+            profileManager: manager
+        )
+
+        XCTAssertNotEqual(
+            state.targetLetter,
+            "A",
+            "A fresh same-day Letters sitting repeated the prior final target"
+        )
+    }
+
+    @MainActor
+    func testLetterExtraPracticeDoesNotConsumeDailyFairnessLedger() {
+        let today = LocalDay.today()
+        let introduced = Set(["A", "B", "C", "D", "E", "F"])
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: introduced),
+            hasCompletedCalibration: true,
+            dailyTargetAskDay: today,
+            dailyTargetAskCounts: ["A": 2],
+            everMasteredLetters: introduced,
+            introducedLetters: introduced
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: "A",
+            focusScaffoldingLevel: 0,
+            mode: .extraPractice(letter: "A")
+        )
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+
+        for _ in 0..<3 {
+            XCTAssertEqual(state.targetLetter, "A")
+            _ = state.processAnswer("A")
+            state.setupNewRound()
+        }
+
+        XCTAssertEqual(
+            manager.profiles[0].dailyTargetAskCounts(on: today)["A"],
+            2,
+            "Letter Extra Practice leaked into the ordinary fairness ledger"
+        )
+    }
+
+    @MainActor
+    func testLettersCheckpointRestoresRecencyAndDailyCap() {
+        let introduced = Set(["A", "B", "C", "D", "E", "F", "G", "H"])
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: introduced),
+            hasCompletedCalibration: true,
+            everMasteredLetters: introduced,
+            introducedLetters: introduced
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            focusScaffoldingLevel: 0,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction
+        )
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+        for _ in 0..<6 {
+            _ = state.processAnswer(state.targetLetter)
+            state.setupNewRound()
+        }
+        let displayedBeforeRestore = state.targetLetter
+        let snapshot = state.captureSnapshot(advanceToNextRoundOnRestore: true)
+
+        let restored = AdaptiveGameState(
+            profile: manager.profiles[0],
+            plan: plan,
+            profileManager: manager,
+            restoredSnapshot: snapshot
+        )
+
+        XCTAssertNotEqual(restored.targetLetter, displayedBeforeRestore)
+        let restoredCounts = restored.captureSnapshot().sessionTargetCounts ?? [:]
+        XCTAssertTrue(
+            restoredCounts.values.allSatisfy {
+                $0 <= Profile.letterDailyTargetAskLimit
+            }
+        )
+    }
+
+    @MainActor
+    func testLettersDailyChallengeFailsClosedWhenEveryIntroducedTargetIsCapped() {
+        let today = LocalDay.today()
+        let introduced = Set(["A", "B", "C", "D", "E", "F"])
+        let legacyCounts = Dictionary(
+            uniqueKeysWithValues: introduced.map { ($0, 16) }
+        )
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            language: .english,
+            letterStats: knownStats(for: introduced),
+            hasCompletedCalibration: true,
+            dailyTargetAskDay: today,
+            dailyTargetAskCounts: legacyCounts,
+            everMasteredLetters: introduced,
+            introducedLetters: introduced
+        )
+        XCTAssertTrue(
+            profile.dailyTargetAskCounts(on: today).values.allSatisfy {
+                $0 == Profile.letterDailyTargetAskLimit
+            }
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            focusScaffoldingLevel: 0,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction
+        )
+
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+
+        XCTAssertEqual(state.sessionEnded, .tiredSignal)
+        XCTAssertTrue(state.targetLetter.isEmpty)
+        XCTAssertTrue(state.displayedLetters.isEmpty)
     }
 
     @MainActor
@@ -2777,7 +2976,8 @@ final class PismenkaModelTests: XCTestCase {
             avatarId: .lion,
             language: .english,
             letterStats: stats,
-            hasCompletedCalibration: true
+            hasCompletedCalibration: true,
+            introducedLetters: strongLetters.union(weakLetters).union(["A"])
         )
         let manager = ProfileManager()
         manager.profiles = [profile]
@@ -4215,6 +4415,7 @@ final class PismenkaModelTests: XCTestCase {
 
                 if outcome.sessionEndReason != nil { break }
                 state.setupNewRound()
+                if state.sessionEnded != nil { break }
             }
         }
     }
@@ -4950,6 +5151,413 @@ final class NumbersModeTests: XCTestCase {
         XCTAssertEqual(manager.profiles[0].completedLetterSessionsInCycle, 0)
     }
 
+    func testNumbersDailyChallengeBalancesSingleWeakNumberAtDailyCap() {
+        let today = LocalDay.today()
+        let introduced = Set((1...12).map(String.init))
+        let strongNumbers = introduced.subtracting(["10"])
+        let now = Date()
+        let strongStat = NumberStat(
+            recentResults: Array(repeating: true, count: 8),
+            targetAttempts: 20,
+            targetCorrect: 20,
+            firstSeenAt: now,
+            lastSeenAt: now,
+            lastTestedAt: now
+        )
+        var stats = Dictionary(
+            uniqueKeysWithValues: strongNumbers.map { ($0, strongStat) }
+        )
+        stats["10"] = NumberStat(
+            recentResults: [false, false],
+            targetAttempts: 2,
+            targetCorrect: 0,
+            firstSeenAt: now,
+            lastSeenAt: now,
+            lastTestedAt: now
+        )
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            numberStats: stats,
+            introducedNumbers: introduced,
+            everMasteredNumbers: strongNumbers,
+            hasCompletedNumberCalibration: true,
+            numberDailyTargetAskDay: today,
+            numberDailyTargetAskCounts: ["10": 4]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: 0,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction
+        )
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+
+        var targets: [String] = []
+        for _ in 0..<25 {
+            targets.append(state.targetLetter)
+            let outcome = state.processAnswer(state.targetLetter)
+            if outcome.sessionEndReason != nil { break }
+            state.setupNewRound()
+        }
+
+        XCTAssertEqual(targets.count, 25)
+        XCTAssertEqual(targets.first, "10", "The final open ask for the weak number should still be used")
+        XCTAssertEqual(
+            targets.filter { $0 == "10" }.count,
+            1,
+            "A narrow needs-work pool must not bypass the number's daily target cap"
+        )
+        XCTAssertFalse(
+            zip(targets, targets.dropFirst()).contains { $0.0 == $0.1 },
+            "Daily number targets must not repeat consecutively while alternatives exist: \(targets)"
+        )
+        for (number, count) in Dictionary(grouping: targets, by: { $0 }).mapValues(\.count) {
+            XCTAssertLessThanOrEqual(
+                count,
+                Profile.numberDailyTargetAskLimit,
+                "\(number) exceeded the daily target cap: \(targets)"
+            )
+        }
+    }
+
+    func testNumbersDailyChallengeKeepsFocusAndRescuesInsideStrictFairnessInvariants() throws {
+        let introduced = Set((1...12).map(String.init))
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            numberStats: Dictionary(
+                uniqueKeysWithValues: introduced.map { ($0, NumberStat()) }
+            ),
+            introducedNumbers: introduced,
+            currentFocusNumber: "10",
+            hasCompletedNumberCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: "10",
+            focusTarget: .number("10"),
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: 2,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction,
+            dailySpotlightLetter: "10"
+        )
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+
+        var targets: [String] = []
+        var sawRescue = false
+        for round in 0..<25 {
+            targets.append(state.targetLetter)
+            sawRescue = sawRescue || state.captureSnapshot().currentRoundIsRescue
+            let selected: String
+            if round < 4 {
+                selected = try XCTUnwrap(
+                    state.displayedLetters.first(where: { $0 != state.targetLetter })
+                )
+            } else {
+                selected = state.targetLetter
+            }
+            let outcome = state.processAnswer(selected)
+            XCTAssertNil(outcome.sessionEndReason, "The stress run ended unexpectedly on round \(round)")
+            state.setupNewRound()
+        }
+
+        XCTAssertTrue(sawRescue, "Four genuine misses must exercise the rescue/governor path")
+        XCTAssertFalse(
+            zip(targets, targets.dropFirst()).contains { $0.0 == $0.1 },
+            "Focus or rescue produced an adjacent duplicate: \(targets)"
+        )
+        for (number, count) in Dictionary(grouping: targets, by: { $0 }).mapValues(\.count) {
+            XCTAssertLessThanOrEqual(
+                count,
+                Profile.numberDailyTargetAskLimit,
+                "\(number) exceeded the fail-closed cap: \(targets)"
+            )
+        }
+        XCTAssertLessThanOrEqual(
+            targets.filter { $0 == "10" }.count,
+            Profile.numberDailyTargetAskLimit
+        )
+    }
+
+    func testNumbersFreshSameDaySessionRestoresRecentTargetBoundary() {
+        let introduced = Set((1...12).map(String.init))
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            introducedNumbers: introduced,
+            hasCompletedNumberCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        manager.recordAnswer(
+            profileId: profile.id,
+            target: .number("10"),
+            wasCorrect: true,
+            asTarget: true,
+            optionsShown: [.number("10"), .number("9"), .number("8"), .number("7")],
+            intent: .staleReview,
+            phaseAtAnswer: .plainReview,
+            countsTowardDailyPractice: true
+        )
+        let persisted = manager.profiles[0]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: 0,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction
+        )
+
+        let state = AdaptiveGameState(
+            profile: persisted,
+            plan: plan,
+            profileManager: manager
+        )
+
+        XCTAssertNotEqual(
+            state.targetLetter,
+            "10",
+            "A fresh same-day sitting repeated the previous sitting's final target"
+        )
+    }
+
+    func testNumbersCheckpointRestoresRecencyAndDailyCap() {
+        let introduced = Set((1...12).map(String.init))
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            introducedNumbers: introduced,
+            hasCompletedNumberCalibration: true
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: 0,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction
+        )
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+        for _ in 0..<6 {
+            _ = state.processAnswer(state.targetLetter)
+            state.setupNewRound()
+        }
+        let displayedBeforeRestore = state.targetLetter
+        let snapshot = state.captureSnapshot(advanceToNextRoundOnRestore: true)
+        XCTAssertFalse(snapshot.recentTargetLetters?.isEmpty ?? true)
+
+        let restored = AdaptiveGameState(
+            profile: manager.profiles[0],
+            plan: plan,
+            profileManager: manager,
+            restoredSnapshot: snapshot
+        )
+
+        XCTAssertNotEqual(
+            restored.targetLetter,
+            displayedBeforeRestore,
+            "Checkpoint advancement repeated the in-flight target"
+        )
+        let restoredCounts = restored.captureSnapshot().sessionTargetCounts ?? [:]
+        for count in restoredCounts.values {
+            XCTAssertLessThanOrEqual(count, Profile.numberDailyTargetAskLimit)
+        }
+    }
+
+    func testNumberExtraPracticeDoesNotConsumeDailyFairnessLedger() {
+        let today = LocalDay.today()
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            introducedNumbers: Set((1...12).map(String.init)),
+            hasCompletedNumberCalibration: true,
+            numberDailyTargetAskDay: today,
+            numberDailyTargetAskCounts: ["10": 2]
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: "10",
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: 0,
+            mode: .extraPractice(letter: "10")
+        )
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+
+        for _ in 0..<3 {
+            XCTAssertEqual(state.targetLetter, "10")
+            _ = state.processAnswer("10")
+            state.setupNewRound()
+        }
+
+        XCTAssertEqual(
+            manager.profiles[0].numberDailyTargetAskCounts(on: today)["10"],
+            2,
+            "Extra Practice leaked into the ordinary Numbers fairness ledger"
+        )
+    }
+
+    func testNumbersDailyChallengeFailsClosedWhenEveryIntroducedTargetIsCapped() {
+        let today = LocalDay.today()
+        let introduced = Set((1...6).map(String.init))
+        let overLimitCounts = Dictionary(
+            uniqueKeysWithValues: introduced.map { ($0, 16) }
+        )
+        let profile = Profile(
+            name: "Mila",
+            avatarId: .lion,
+            introducedNumbers: introduced,
+            hasCompletedNumberCalibration: true,
+            numberDailyTargetAskDay: today,
+            numberDailyTargetAskCounts: overLimitCounts
+        )
+        XCTAssertTrue(
+            profile.numberDailyTargetAskCounts(on: today).values.allSatisfy {
+                $0 == Profile.numberDailyTargetAskLimit
+            },
+            "Legacy over-limit profile values were not sanitized"
+        )
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let plan = SessionPlan(
+            warmupLength: 0,
+            introducedNewFocusLetter: false,
+            dayStreakCount: 1,
+            dayStreakIncreased: false,
+            focusLetter: nil,
+            primaryLayer: .numbers,
+            activityKind: .numberRecognition,
+            focusScaffoldingLevel: 0,
+            dailyGoalTarget: 25,
+            dailyPracticeKind: .introduction
+        )
+
+        let state = AdaptiveGameState(
+            profile: profile,
+            plan: plan,
+            profileManager: manager
+        )
+
+        XCTAssertEqual(state.sessionEnded, .tiredSignal)
+        XCTAssertTrue(state.targetLetter.isEmpty)
+        XCTAssertTrue(state.displayedLetters.isEmpty)
+    }
+
+    func testEarlyRecognitionNumbersCoverZeroThroughTwenty() {
+        XCTAssertEqual(NumberDifficulty.earlyRecognitionNumbers, (0...20).map(String.init))
+        XCTAssertEqual(NumberDifficulty.maxNewNumbersPerDay, 2)
+        for value in 0...20 {
+            XCTAssertTrue(
+                NumberDifficulty.isReadyToIntroduce(
+                    String(value),
+                    introduced: [],
+                    known: []
+                ),
+                "\(value) should be freely introducible in the early band"
+            )
+        }
+        // 21 still needs the decade-20 foothold.
+        XCTAssertFalse(
+            NumberDifficulty.isReadyToIntroduce("21", introduced: [], known: [])
+        )
+        XCTAssertTrue(
+            NumberDifficulty.isReadyToIntroduce("21", introduced: ["20"], known: [])
+        )
+        var earlyOrder: [String] = (1...10).map(String.init)
+        earlyOrder.append("0")
+        earlyOrder.append(contentsOf: (11...20).map(String.init))
+        let prefix = Array(NumberDifficulty.introductionOrder.prefix(earlyOrder.count))
+        XCTAssertEqual(prefix, earlyOrder)
+        let rest = Array(NumberDifficulty.introductionOrder.dropFirst(earlyOrder.count))
+        XCTAssertFalse(rest.contains("20"), "20 must appear only once in introductionOrder")
+    }
+
+    func testNumbersSessionIntroducesTwoPerDayAndStops() throws {
+        var profile = Profile(
+            name: "Bernie",
+            avatarId: .bee,
+            hasCompletedCalibration: true,
+            hasCompletedNumberCalibration: true
+        )
+        // Seed a distant 4-option pool so nextFocusCandidate can fire.
+        for key in ["1", "2", "3", "4"] {
+            profile.introducedNumbers.insert(key)
+            var stat = NumberStat()
+            stat.parentOverride = .markedKnown(date: Date())
+            profile.numberStats[key] = stat
+        }
+        let manager = ProfileManager()
+        manager.profiles = [profile]
+        let id = profile.id
+
+        _ = manager.commitSessionStartIfNeeded(profileId: id, layer: .numbers)
+        let afterFirst = manager.profiles[0]
+        XCTAssertEqual(afterFirst.numbersIntroduced(on: LocalDay.today()), 2)
+        XCTAssertEqual(afterFirst.introducedNumbers.count, 6)
+        let newlyAdded = afterFirst.introducedNumbers.subtracting(["1", "2", "3", "4"])
+        XCTAssertEqual(newlyAdded.count, 2)
+        XCTAssertTrue(
+            newlyAdded.allSatisfy { NumberDifficulty.earlyRecognitionNumbers.contains($0) }
+        )
+
+        _ = manager.commitSessionStartIfNeeded(profileId: id, layer: .numbers)
+        let afterSecond = manager.profiles[0]
+        XCTAssertEqual(
+            afterSecond.introducedNumbers.count,
+            6,
+            "Same-day re-entry must not introduce a third/fourth number"
+        )
+        XCTAssertEqual(afterSecond.numbersIntroduced(on: LocalDay.today()), 2)
+    }
+
     func testRecordNumberAnswerWritesNumberStatsAndEvent() throws {
         let profile = Profile(
             name: "Mila",
@@ -5184,5 +5792,252 @@ final class NumbersModeTests: XCTestCase {
             store.checkpoint(for: profileId, layer: .letters)?.profileId, profileId,
             "Clearing the numbers slot must leave the letters checkpoint intact"
         )
+    }
+
+    // MARK: - Backup clobber protection
+
+    func testAppVersionCompareOrdering() {
+        XCTAssertEqual(AppVersion.compare("1.4", "1.5"), .orderedAscending)
+        XCTAssertEqual(AppVersion.compare("1.5", "1.4"), .orderedDescending)
+        XCTAssertEqual(AppVersion.compare("1.5", "1.5.0"), .orderedSame)
+        XCTAssertEqual(AppVersion.compare("1.5.1", "1.5"), .orderedDescending)
+        XCTAssertEqual(AppVersion.compare("2.0", "1.9.9"), .orderedDescending)
+    }
+
+    func testRoundEventUnknownOptionalEnumsDecodeAsNil() throws {
+        let event = RoundEvent(
+            date: Date(timeIntervalSince1970: 1),
+            target: "A",
+            unitKind: .letter,
+            activityKind: .letterRecognition,
+            options: ["A", "B"],
+            selected: "A",
+            wasCorrect: true,
+            responseTime: 1.0,
+            phase: .drill,
+            intent: .focusTarget,
+            mistakeType: .confusion,
+            didReplayPrompt: false,
+            replayCount: 0,
+            wasDiscounted: false,
+            heartsAfter: 5,
+            liveDifficulty: .normal,
+            isRescue: false,
+            rescueDifficulty: nil,
+            attemptContext: .independent
+        )
+        let data = try JSONEncoder().encode(event)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json["unitKind"] = "futureThing"
+        json["activityKind"] = "futureActivity"
+        json["mistakeType"] = "futureMistake"
+        json["liveDifficulty"] = "futureDifficulty"
+        json["attemptContext"] = "futureContext"
+
+        let decoded = try JSONDecoder().decode(RoundEvent.self, from: try JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(decoded.unitKind)
+        XCTAssertNil(decoded.activityKind)
+        XCTAssertNil(decoded.mistakeType)
+        XCTAssertNil(decoded.liveDifficulty)
+        XCTAssertNil(decoded.attemptContext)
+        XCTAssertEqual(decoded.target, "A")
+        XCTAssertTrue(decoded.wasCorrect)
+    }
+
+    func testProfileSkipsUndecodableRoundEvents() throws {
+        var profile = Profile(name: "Bernie", avatarId: .unicorn)
+        let good = RoundEvent(
+            date: Date(timeIntervalSince1970: 1),
+            target: "A",
+            options: ["A", "B"],
+            selected: "A",
+            wasCorrect: true,
+            responseTime: 1.0,
+            phase: .drill,
+            intent: .focusTarget,
+            mistakeType: nil,
+            didReplayPrompt: false,
+            replayCount: 0,
+            wasDiscounted: false,
+            heartsAfter: 5,
+            liveDifficulty: .normal,
+            isRescue: false,
+            rescueDifficulty: nil
+        )
+        profile.recentRoundEvents = [good]
+        let data = try JSONEncoder().encode(profile)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var events = try XCTUnwrap(json["recentRoundEvents"] as? [[String: Any]])
+        var bad = events[0]
+        bad["phase"] = "futurePhaseThatDoesNotExist"
+        bad["target"] = "Z"
+        events.append(bad)
+        events.append(events[0])
+        json["recentRoundEvents"] = events
+
+        let decoded = try JSONDecoder().decode(Profile.self, from: try JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.name, "Bernie")
+        XCTAssertEqual(decoded.recentRoundEvents.count, 2)
+        XCTAssertEqual(decoded.recentRoundEvents.map(\.target), ["A", "A"])
+    }
+
+    func testDecideCloudWriteRejectsSchemaDowngradeAndEmptyClobber() {
+        let settings = AppSettingsSnapshot(
+            musicEnabled: false,
+            sfxEnabled: true,
+            reduceMotionEnabled: false,
+            confettiEnabled: true,
+            personalizedCzechLettersEnabled: false,
+            parentGateMethod: .swipe,
+            remindersEnabled: false,
+            reminderHour: 7,
+            reminderMinute: 0,
+            lowercaseMode: .uppercaseOnly,
+            modifiedAt: Date(timeIntervalSince1970: 1)
+        )
+        var proposed = CloudBackupEnvelope(
+            profiles: [],
+            settings: settings
+        )
+        proposed.schemaVersion = 2
+        proposed.appVersion = "1.4"
+
+        let existing = ExistingCloudBackupMetadata(
+            schemaVersion: 3,
+            appVersion: "1.5",
+            payloadBytes: 56_948
+        )
+
+        XCTAssertEqual(
+            FirebaseBackupService.decideCloudWrite(
+                proposed: proposed,
+                proposedPayloadBytes: 307,
+                existing: existing,
+                confirmAppVersionDowngrade: false
+            ),
+            .reject(.schemaDowngrade(existing: 3, proposed: 2))
+        )
+
+        proposed.schemaVersion = 3
+        XCTAssertEqual(
+            FirebaseBackupService.decideCloudWrite(
+                proposed: proposed,
+                proposedPayloadBytes: 307,
+                existing: existing,
+                confirmAppVersionDowngrade: false
+            ),
+            .reject(.emptyOverNonEmpty)
+        )
+    }
+
+    func testDecideCloudWriteNeedsConfirmationForAppVersionDowngrade() {
+        let settings = AppSettingsSnapshot(
+            musicEnabled: false,
+            sfxEnabled: true,
+            reduceMotionEnabled: false,
+            confettiEnabled: true,
+            personalizedCzechLettersEnabled: false,
+            parentGateMethod: .swipe,
+            remindersEnabled: false,
+            reminderHour: 7,
+            reminderMinute: 0,
+            lowercaseMode: .uppercaseOnly,
+            modifiedAt: Date(timeIntervalSince1970: 1)
+        )
+        var proposed = CloudBackupEnvelope(
+            profiles: [Profile(name: "Bernie", avatarId: .bee)],
+            settings: settings
+        )
+        proposed.schemaVersion = 3
+        proposed.appVersion = "1.4"
+
+        let existing = ExistingCloudBackupMetadata(
+            schemaVersion: 3,
+            appVersion: "1.5",
+            payloadBytes: 56_948
+        )
+
+        XCTAssertEqual(
+            FirebaseBackupService.decideCloudWrite(
+                proposed: proposed,
+                proposedPayloadBytes: 20_000,
+                existing: existing,
+                confirmAppVersionDowngrade: false
+            ),
+            .needsConfirmation(cloudVersion: "1.5", localVersion: "1.4")
+        )
+
+        XCTAssertEqual(
+            FirebaseBackupService.decideCloudWrite(
+                proposed: proposed,
+                proposedPayloadBytes: 20_000,
+                existing: existing,
+                confirmAppVersionDowngrade: true
+            ),
+            .allow
+        )
+    }
+
+    func testDecideCloudWriteAllowsFirstWriteAndSameOrNewerApp() {
+        let settings = AppSettingsSnapshot(
+            musicEnabled: false,
+            sfxEnabled: true,
+            reduceMotionEnabled: false,
+            confettiEnabled: true,
+            personalizedCzechLettersEnabled: false,
+            parentGateMethod: .swipe,
+            remindersEnabled: false,
+            reminderHour: 7,
+            reminderMinute: 0,
+            lowercaseMode: .uppercaseOnly,
+            modifiedAt: Date(timeIntervalSince1970: 1)
+        )
+        var proposed = CloudBackupEnvelope(
+            profiles: [Profile(name: "Vilik", avatarId: .lion)],
+            settings: settings
+        )
+        proposed.appVersion = "1.5"
+
+        XCTAssertEqual(
+            FirebaseBackupService.decideCloudWrite(
+                proposed: proposed,
+                proposedPayloadBytes: 12_000,
+                existing: nil,
+                confirmAppVersionDowngrade: false
+            ),
+            .allow
+        )
+
+        let existing = ExistingCloudBackupMetadata(
+            schemaVersion: 3,
+            appVersion: "1.4",
+            payloadBytes: 10_000
+        )
+        XCTAssertEqual(
+            FirebaseBackupService.decideCloudWrite(
+                proposed: proposed,
+                proposedPayloadBytes: 12_000,
+                existing: existing,
+                confirmAppVersionDowngrade: false
+            ),
+            .allow
+        )
+    }
+
+    func testLocalStoreUntrustedSetOnUnreadableProfiles() throws {
+        let suiteName = "UntrustedStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(Data([0xFF, 0x00, 0xAB]), forKey: "pismenka_profiles_v2")
+        defaults.removeObject(forKey: "pismenka_profiles_v2_last_good")
+
+        let manager = ProfileManager(defaults: defaults)
+        XCTAssertTrue(manager.localStoreUntrusted)
+        XCTAssertTrue(manager.profiles.isEmpty)
+
+        manager.replaceProfiles([Profile(name: "Bernie", avatarId: .bee)])
+        XCTAssertFalse(manager.localStoreUntrusted)
+        XCTAssertEqual(manager.profiles.count, 1)
     }
 }

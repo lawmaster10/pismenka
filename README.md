@@ -6,6 +6,7 @@ Gameplay and learning are offline. Optional Apple/Google Firebase backup is pare
 
 ## Current Scope
 
+- Current release: **1.6 (build 1)**
 - English and Czech letter recognition, plus a numbers mode (0–100 recognition) as a peer learning layer
 - First-launch language choice (Czech by default) with spoken previews, then optional Apple/Google backup
 - One-time per-profile calibration (letters and numbers each have their own)
@@ -16,6 +17,21 @@ Gameplay and learning are offline. Optional Apple/Google Firebase backup is pare
 - Bundled letter and number audio, game SFX, and optional personalized Czech letter prompts
 
 Syllable and word-reading models remain in the codebase as dormant scaffolding. They are not scheduled, unlocked, shown, or shipped as audio in this release.
+
+## Letter and Number Target Fairness
+
+Number sessions previously applied the daily target cap and recent-target checks only to the scheduler's narrow preferred pool. If one number was the sole remaining "needs work" candidate, that one-item pool appeared to have no alternative, so the fallback selected it repeatedly—even after its daily cap—and could place it on consecutive regular rounds. The Letters implementation had a final fallback across the wider introduced set; the Numbers port omitted that step.
+
+The deeper audit also found that Letters still had weaker legacy behavior: its cap was 10, could fail open, fresh sessions did not restore target recency, and Extra Practice shared the ordinary daily ledger. Both ordinary 25-answer modes now enforce the same invariants at final assignment gates shared by warm-up, focus, review, contrast, and rescue paths:
+
+- No letter or number can be targeted more than **5 times per local day** (20% of the visible goal).
+- The target can never equal the immediately previous target. Governor-prioritized rescues retain an intervening round.
+- The cap is fail-closed: an exhausted introduced pool ends the sitting instead of silently exceeding the limit.
+- Same-day recency is restored from persisted round events and saved in checkpoints, preventing session-boundary and restore-boundary repeats.
+- Extra Practice remains intentionally focused but no longer writes to the ordinary daily challenge's fairness ledger.
+- Legacy over-limit counters are clamped on read and on their next write.
+
+Symmetric regression coverage now includes focus drilling, mistakes plus rescue/governor behavior, fresh same-day sessions, checkpoint restoration, Extra Practice isolation, legacy values, and total legal-pool exhaustion for both Letters and Numbers.
 
 ## Docs
 

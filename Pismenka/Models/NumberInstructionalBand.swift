@@ -60,7 +60,7 @@ enum NumberInstructionalBand: String, Codable, CaseIterable, Comparable {
         if knownCount >= 20 || strongKnownCount >= 12 {
             return .strong
         }
-        if knownCount >= 8 || introducedCount >= 15 {
+        if knownCount >= 8 || introducedCount >= 22 {
             return .developing
         }
         return .beginner

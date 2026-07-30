@@ -51,6 +51,30 @@ struct CloudBackupMergeResult: Equatable {
     var didChangeLocalProfiles: Bool
 }
 
+/// Metadata read from the existing Firestore `current` document without
+/// decoding the full payload — enough to refuse destructive overwrites.
+struct ExistingCloudBackupMetadata: Equatable {
+    var schemaVersion: Int
+    var appVersion: String
+    var payloadBytes: Int
+
+    /// Matches the Firestore rules heuristic and the client write guard.
+    static let substantialPayloadBytes = 4096
+    static let tinyPayloadBytes = 1024
+}
+
+enum CloudBackupProtectionReason: Equatable {
+    case schemaDowngrade(existing: Int, proposed: Int)
+    case emptyOverNonEmpty
+    case localStoreUntrusted
+}
+
+enum CloudBackupWriteDecision: Equatable {
+    case allow
+    case reject(CloudBackupProtectionReason)
+    case needsConfirmation(cloudVersion: String, localVersion: String)
+}
+
 enum FirebaseBackupStatus: Equatable {
     case notConfigured
     case signedOut
@@ -60,6 +84,8 @@ enum FirebaseBackupStatus: Equatable {
     case tooLarge(Int)
     case offline
     case failed(String)
+    case protectedExistingBackup(CloudBackupProtectionReason)
+    case needsConfirmationToOverwriteNewerApp(cloudVersion: String, localVersion: String)
 }
 
 @MainActor
@@ -278,9 +304,9 @@ final class FirebaseBackupService: ObservableObject {
         }
     }
 
-    func backupNow() {
+    func backupNow(confirmAppVersionDowngrade: Bool = false) {
         Task { @MainActor in
-            await forceSyncNow()
+            await forceSyncNow(confirmAppVersionDowngrade: confirmAppVersionDowngrade)
         }
     }
 
@@ -294,7 +320,7 @@ final class FirebaseBackupService: ObservableObject {
         scheduleBackup(profiles: profiles, settings: settings)
     }
 
-    private func forceSyncNow() async {
+    private func forceSyncNow(confirmAppVersionDowngrade: Bool = false) async {
         guard let profileManager, let settings else { return }
         cancelScheduledBackup()
         profileManager.flushPendingSave()
@@ -304,7 +330,8 @@ final class FirebaseBackupService: ObservableObject {
         await performBackup(
             profiles: profileManager.profiles,
             settings: settings.snapshot(),
-            waitForServerAcknowledgement: true
+            waitForServerAcknowledgement: true,
+            confirmAppVersionDowngrade: confirmAppVersionDowngrade
         )
     }
 
@@ -320,7 +347,8 @@ final class FirebaseBackupService: ObservableObject {
                 await self.performBackup(
                     profiles: pendingBackup.profiles,
                     settings: pendingBackup.settings,
-                    waitForServerAcknowledgement: false
+                    waitForServerAcknowledgement: false,
+                    confirmAppVersionDowngrade: false
                 )
             }
         }
@@ -341,7 +369,8 @@ final class FirebaseBackupService: ObservableObject {
         profiles: [Profile],
         settings: AppSettingsSnapshot,
         successStatus: FirebaseBackupStatus? = nil,
-        waitForServerAcknowledgement: Bool
+        waitForServerAcknowledgement: Bool,
+        confirmAppVersionDowngrade: Bool = false
     ) async {
         guard !isApplyingCloudSnapshot else { return }
         guard FirebaseBootstrap.isConfigured else {
@@ -358,6 +387,11 @@ final class FirebaseBackupService: ObservableObject {
             return
         }
 
+        if profileManager?.localStoreUntrusted == true {
+            status = .protectedExistingBackup(.localStoreUntrusted)
+            return
+        }
+
         let generation = nextBackupGeneration()
         status = .syncing
         let envelope = CloudBackupEnvelope(profiles: profiles, settings: settings)
@@ -369,6 +403,28 @@ final class FirebaseBackupService: ObservableObject {
             }
             guard payloadBytes <= Self.maxPayloadBytes else {
                 status = .tooLarge(payloadBytes)
+                return
+            }
+
+            let existing = try await loadExistingBackupMetadata(userId: user.uid)
+            switch Self.decideCloudWrite(
+                proposed: envelope,
+                proposedPayloadBytes: payloadBytes,
+                existing: existing,
+                confirmAppVersionDowngrade: confirmAppVersionDowngrade
+            ) {
+            case .allow:
+                break
+            case .reject(let reason):
+                guard isCurrentBackupGeneration(generation) else { return }
+                status = .protectedExistingBackup(reason)
+                return
+            case .needsConfirmation(let cloudVersion, let localVersion):
+                guard isCurrentBackupGeneration(generation) else { return }
+                status = .needsConfirmationToOverwriteNewerApp(
+                    cloudVersion: cloudVersion,
+                    localVersion: localVersion
+                )
                 return
             }
 
@@ -387,6 +443,12 @@ final class FirebaseBackupService: ObservableObject {
             guard isCurrentBackupGeneration(generation) else { return }
             status = .failed(error.localizedDescription)
         }
+    }
+
+    private func loadExistingBackupMetadata(userId: String) async throws -> ExistingCloudBackupMetadata? {
+        let snapshot = try await backupDocument(userId: userId).getDocument()
+        guard snapshot.exists, let data = snapshot.data() else { return nil }
+        return Self.existingBackupMetadata(from: data)
     }
 
     private func restoreAndMergeFromCloud() async {
@@ -608,6 +670,64 @@ final class FirebaseBackupService: ObservableObject {
         }
 
         return CloudBackupMergeResult(profiles: result, didChangeLocalProfiles: changed)
+    }
+
+    /// Pure write gate used by `performBackup` and unit tests.
+    nonisolated static func decideCloudWrite(
+        proposed: CloudBackupEnvelope,
+        proposedPayloadBytes: Int,
+        existing: ExistingCloudBackupMetadata?,
+        confirmAppVersionDowngrade: Bool
+    ) -> CloudBackupWriteDecision {
+        guard let existing else { return .allow }
+
+        if proposed.schemaVersion < existing.schemaVersion {
+            return .reject(
+                .schemaDowngrade(existing: existing.schemaVersion, proposed: proposed.schemaVersion)
+            )
+        }
+
+        let existingIsSubstantial =
+            existing.payloadBytes >= ExistingCloudBackupMetadata.substantialPayloadBytes
+        if proposed.profiles.isEmpty, existingIsSubstantial {
+            return .reject(.emptyOverNonEmpty)
+        }
+        // Mirror the Firestore rule: refuse tiny payloads over substantial ones
+        // even when the local store has placeholder profiles.
+        if existingIsSubstantial,
+           proposedPayloadBytes < ExistingCloudBackupMetadata.tinyPayloadBytes {
+            return .reject(.emptyOverNonEmpty)
+        }
+
+        if AppVersion.compare(proposed.appVersion, existing.appVersion) == .orderedAscending {
+            if confirmAppVersionDowngrade {
+                return .allow
+            }
+            return .needsConfirmation(
+                cloudVersion: existing.appVersion,
+                localVersion: proposed.appVersion
+            )
+        }
+
+        return .allow
+    }
+
+    nonisolated static func existingBackupMetadata(from data: [String: Any]) -> ExistingCloudBackupMetadata? {
+        guard let schemaVersion = intField(data["schemaVersion"]) else { return nil }
+        let appVersion = data["appVersion"] as? String ?? "0"
+        let payloadBytes = intField(data["payloadBytes"]) ?? 0
+        return ExistingCloudBackupMetadata(
+            schemaVersion: schemaVersion,
+            appVersion: appVersion,
+            payloadBytes: payloadBytes
+        )
+    }
+
+    private nonisolated static func intField(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? Int64 { return Int(value) }
+        if let value = value as? NSNumber { return value.intValue }
+        return nil
     }
 
     nonisolated static func backupDocumentFields(for envelope: CloudBackupEnvelope) throws -> [String: Any] {

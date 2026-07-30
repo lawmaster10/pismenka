@@ -173,10 +173,12 @@ struct CalibrationView: View {
 
     // MARK: - Game content
 
+    /// Mirrors `GameView`'s session chrome: title + home up top, progress strip
+    /// and replay play button along the bottom — so first-time calibration
+    /// feels identical to the ordinary daily test.
     private var gameContent: some View {
-        VStack(spacing: 0) {
-            calibrationTopBar
-            Spacer()
+        VStack(spacing: 10) {
+            calibrationHeader
             LetterGrid(
                 letters: displayedLetters,
                 targetLetter: targetLetter,
@@ -185,58 +187,100 @@ struct CalibrationView: View {
                 color: profile.colorTheme,
                 onLetterTap: handleLetterTap
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .layoutPriority(1)
+            bottomControlRow
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var calibrationHeader: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(calibrationEyebrow.uppercased())
+                    .brandEyebrowStyle()
+                Text(calibrationTitle)
+                    .font(.brandTitleL(26))
+                    .tracking(-0.6)
+                    .foregroundColor(.ink)
+            }
             Spacer()
+            homeButton(size: 40)
         }
     }
 
-    private var calibrationTopBar: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Button(action: handleHomeTap) {
-                    Image(systemName: "house.fill")
-                        .font(.system(size: 18, weight: .black))
-                        .foregroundColor(.slate500)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            Circle()
-                                .fill(Color.white.opacity(0.85))
-                                .overlay(Circle().stroke(Color.creamDeep, lineWidth: 1))
-                        )
-                        .shadow(color: Color.ink.opacity(0.06), radius: 6, x: 0, y: 3)
-                }
-                .accessibilityLabel("Home")
+    private var calibrationEyebrow: String { "Assessment" }
 
-                Spacer()
-                ZStack {
+    private var calibrationTitle: String {
+        isNumbersLayer ? "Numbers" : "Letters"
+    }
+
+    private func homeButton(size: CGFloat) -> some View {
+        Button(action: handleHomeTap) {
+            Image(systemName: "house.fill")
+                .font(.system(size: size * 0.41, weight: .black))
+                .foregroundColor(.slate500)
+                .frame(width: size, height: size)
+                .background(
                     Circle()
-                        .fill(profile.colorTheme)
-                        .frame(width: 50, height: 50)
-                        .shadow(color: profile.colorTheme.opacity(0.3), radius: 8, x: 0, y: 4)
-                    Text(profile.avatarId.emoji)
-                        .font(.system(size: 28))
-                }
-                Spacer()
-                BrandIconButton(
-                    systemImage: "play.fill",
-                    action: {
-                        HapticService.shared.tap()
-                        playTargetAudio()
-                    },
-                    size: 64,
-                    style: .leaf,
-                    accessibilityLabel: "Replay sound"
+                        .fill(Color.white.opacity(0.85))
+                        .overlay(Circle().stroke(Color.creamDeep.opacity(0.9), lineWidth: 1))
                 )
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-
-            GradientProgressBar(
-                progress: totalRounds > 0
-                    ? Double(roundsAnswered) / Double(totalRounds)
-                    : 0
-            )
-            .padding(.horizontal, 24)
+                .shadow(color: Color.ink.opacity(0.06), radius: 6, x: 0, y: 3)
         }
+        .accessibilityLabel("Home")
+    }
+
+    private var bottomControlRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            calibrationProgressStrip
+                .layoutPriority(1)
+            BrandIconButton(
+                systemImage: "play.fill",
+                action: {
+                    HapticService.shared.tap()
+                    playTargetAudio()
+                },
+                size: 58,
+                style: .leaf,
+                accessibilityLabel: "Replay sound"
+            )
+        }
+    }
+
+    private var calibrationProgress: Double {
+        guard totalRounds > 0 else { return 0 }
+        return Double(roundsAnswered) / Double(totalRounds)
+    }
+
+    private var calibrationProgressDisplayText: String {
+        "\(roundsAnswered) / \(totalRounds)"
+    }
+
+    private var calibrationProgressStrip: some View {
+        VStack(spacing: 8) {
+            GradientProgressBar(progress: calibrationProgress)
+                .accessibilityLabel("Assessment progress")
+                .accessibilityValue(calibrationProgressDisplayText)
+            HStack(alignment: .firstTextBaseline) {
+                Text(calibrationProgressDisplayText)
+                    .font(.brandBody(14, weight: .black))
+                    .foregroundColor(.slate500)
+                    .monospacedDigit()
+                Spacer()
+                Text("Keep going")
+                    .font(.brandBody(14, weight: .black))
+                    .foregroundColor(.slate500)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.white.opacity(0.8))
+        )
     }
 
     private func handleHomeTap() {

@@ -37,6 +37,7 @@
 		1A0000058 /* LetterSymbol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000068 /* LetterSymbol.swift */; };
 		1A0000059 /* FocusSelectionReason.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000069 /* FocusSelectionReason.swift */; };
 		1A000005A /* RoundEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000006A /* RoundEvent.swift */; };
+		1A0000E2 /* LossyCoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000E3 /* LossyCoding.swift */; };
 		1A000006B /* SessionCheckpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000070 /* SessionCheckpoint.swift */; };
 		1A000006C /* SessionCheckpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000071 /* SessionCheckpointStore.swift */; };
 		1A000006D /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000072 /* NotificationService.swift */; };
@@ -103,6 +104,7 @@
 		1A0000068 /* LetterSymbol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LetterSymbol.swift; sourceTree = "<group>"; };
 		1A0000069 /* FocusSelectionReason.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusSelectionReason.swift; sourceTree = "<group>"; };
 		1A000006A /* RoundEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundEvent.swift; sourceTree = "<group>"; };
+		1A0000E3 /* LossyCoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LossyCoding.swift; sourceTree = "<group>"; };
 		1A0000070 /* SessionCheckpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCheckpoint.swift; sourceTree = "<group>"; };
 		1A0000071 /* SessionCheckpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCheckpointStore.swift; sourceTree = "<group>"; };
 		1A0000072 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
@@ -194,6 +196,7 @@
 				1A0000068 /* LetterSymbol.swift */,
 				1A0000069 /* FocusSelectionReason.swift */,
 				1A000006A /* RoundEvent.swift */,
+				1A0000E3 /* LossyCoding.swift */,
 				1A0000070 /* SessionCheckpoint.swift */,
 				1A0000D1 /* LearningUnit.swift */,
 				1A0000D2 /* UnitProgressStat.swift */,
@@ -433,6 +436,7 @@
 				1A0000058 /* LetterSymbol.swift in Sources */,
 				1A0000059 /* FocusSelectionReason.swift in Sources */,
 				1A000005A /* RoundEvent.swift in Sources */,
+				1A0000E2 /* LossyCoding.swift in Sources */,
 				1A000006B /* SessionCheckpoint.swift in Sources */,
 				1A000006C /* SessionCheckpointStore.swift in Sources */,
 				1A000006D /* NotificationService.swift in Sources */,
@@ -617,7 +621,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 1.6;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -655,7 +659,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 1.6;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -679,7 +683,7 @@
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -699,7 +703,7 @@
 				DEVELOPMENT_TEAM = 6VJV65V7PB;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 1.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pismenka.appTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
